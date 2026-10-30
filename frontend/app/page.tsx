@@ -57,6 +57,10 @@ const ProfileView = dynamic(
   () => import("@/components/shared/ProfileView").then((m) => m.ProfileView),
   { loading: viewLoading }
 );
+const NotificationsView = dynamic(
+  () => import("@/components/shared/NotificationsView").then((m) => m.NotificationsView),
+  { loading: viewLoading }
+);
 // Only mounted while open (see render below) so their code is not downloaded up-front.
 const LeadDetailModal = dynamic(
   () => import("@/components/modules/leads/LeadDetailModal").then((m) => m.LeadDetailModal)
@@ -87,7 +91,6 @@ export default function LeadsDashboardPage() {
   const router = useRouter();
   const [currentTab, setCurrentTab] = useState("overview");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [notificationsOpenSignal, setNotificationsOpenSignal] = useState(0);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
   // Leads state loaded from Database API
@@ -348,8 +351,10 @@ export default function LeadsDashboardPage() {
         return { title: "AI Design", group: "Workspace" };
       case "brand":
         return { title: "Thương hiệu", group: "System" };
+      case "notifications":
+        return { title: "Trung tâm Thông báo", group: "System" };
       case "users":
-        return { title: "Quản lý nhân sự", group: "System" };
+        return { title: "Tác nhân & Bổ nhiệm", group: "System" };
       case "profile":
         return { title: "Hồ sơ tài khoản", group: "System" };
       case "settings":
@@ -376,7 +381,6 @@ export default function LeadsDashboardPage() {
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         userRole={currentUser?.role}
-        onOpenNotifications={() => setNotificationsOpenSignal((n) => n + 1)}
         unreadNotificationsCount={unreadNotificationsCount}
         leadsCount={hasLoadedLeads ? leadStats.total : undefined}
       />
@@ -392,7 +396,6 @@ export default function LeadsDashboardPage() {
             setCurrentTab(tab);
             setSearchQuery(tab === "leads" ? searchText || "" : "");
           }}
-          notificationsOpenSignal={notificationsOpenSignal}
           onUnreadCountChange={setUnreadNotificationsCount}
         />
 
@@ -584,6 +587,17 @@ export default function LeadsDashboardPage() {
 
           {/* TAB: AI DESIGN STUDIO */}
           {currentTab === "ai-design" && <AiDesignView />}
+
+          {/* TAB: NOTIFICATIONS CENTER */}
+          {currentTab === "notifications" && (
+            <NotificationsView
+              leads={leads}
+              userRole={currentUser?.role}
+              onSelectLead={(lead) => setSelectedLead(lead)}
+              onNavigateToTab={(tab) => setCurrentTab(tab)}
+              onUnreadCountChange={setUnreadNotificationsCount}
+            />
+          )}
 
           {/* TAB: ADMIN BRAND */}
           {currentTab === "brand" && <AdminBrandView />}

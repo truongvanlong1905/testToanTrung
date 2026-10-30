@@ -59,7 +59,8 @@ interface HeaderProps {
 }
 
 const ROLE_DISPLAY_NAMES: Record<string, string> = {
-  ADMIN: "Ban Giám Đốc",
+  ADMIN: "Quản trị hệ thống (Admin)",
+  DIRECTOR: "Ban Giám Đốc",
   SALES: "Phòng Kinh Doanh",
   MARKETING: "Phòng Marketing",
   DESIGN: "Phòng Thiết Kế",
@@ -387,11 +388,11 @@ export function Header({
                           type="button"
                           onClick={() => {
                             setShowNotifications(false);
-                            onNavigateToTab("reports");
+                            onNavigateToTab("notifications");
                           }}
                           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
                         >
-                          <ClipboardList className="w-3.5 h-3.5" /> Xem tất cả
+                          <ClipboardList className="w-3.5 h-3.5" /> Mở trang Thông báo
                         </button>
                       </div>
                       <div className="max-h-[55vh] overflow-y-auto divide-y divide-slate-100">

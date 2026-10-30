@@ -16,6 +16,8 @@ import {
   X,
   PanelLeftClose,
   PanelLeftOpen,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ToanTrungLogo } from "@/components/shared/ToanTrungLogo";
@@ -27,7 +29,6 @@ interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
   userRole?: string;
-  onOpenNotifications?: () => void;
   unreadNotificationsCount?: number;
   /** Total Leads, owned by the page (already fetched there — no second request here) */
   leadsCount?: number;
@@ -38,7 +39,7 @@ interface NavItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   badge?: string | number;
-  onClickOverride?: () => void;
+  highlightUnread?: boolean;
 }
 
 const HEX_COLOR = /^#([0-9a-f]{6})$/i;
@@ -64,7 +65,6 @@ export function Sidebar({
   isOpen,
   onClose,
   userRole,
-  onOpenNotifications,
   unreadNotificationsCount = 0,
   leadsCount = 0,
 }: SidebarProps) {
@@ -99,6 +99,7 @@ export function Sidebar({
   }, []);
 
   const toggleCollapse = () => {
+    setTip(null);
     setIsCollapsed((prev) => {
       const next = !prev;
       try {
@@ -149,18 +150,11 @@ export function Sidebar({
 
   const systemItems: NavItem[] = [
     {
-      id: "notifications-action",
+      id: "notifications",
       label: "Thông báo",
       icon: Bell,
       badge: unreadNotificationsCount > 0 ? unreadNotificationsCount : undefined,
-      onClickOverride: () => {
-        if (onOpenNotifications) {
-          onOpenNotifications();
-        } else {
-          onTabChange("reports");
-        }
-        if (window.innerWidth < 1024) onClose();
-      },
+      highlightUnread: unreadNotificationsCount > 0,
     },
     {
       id: "profile",
@@ -206,28 +200,26 @@ export function Sidebar({
         aria-current={isActive ? "page" : undefined}
         onMouseEnter={(e) => {
           if (isCollapsed && window.innerWidth >= 1024) {
-            setTip({ label: item.label, top: e.currentTarget.getBoundingClientRect().top + 6 });
+            setTip({ label: item.label, top: e.currentTarget.getBoundingClientRect().top + 5 });
           }
         }}
         onMouseLeave={() => setTip(null)}
         onFocus={(e) => {
           if (isCollapsed && window.innerWidth >= 1024) {
-            setTip({ label: item.label, top: e.currentTarget.getBoundingClientRect().top + 6 });
+            setTip({ label: item.label, top: e.currentTarget.getBoundingClientRect().top + 5 });
           }
         }}
         onBlur={() => setTip(null)}
         onClick={() => {
           setTip(null);
-          if (item.onClickOverride) {
-            item.onClickOverride();
-            return;
-          }
           onTabChange(item.id);
           if (window.innerWidth < 1024) onClose();
         }}
         className={cn(
           "relative w-full flex items-center rounded-lg text-[13px] transition-colors duration-150 group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/30",
-          isCollapsed ? "lg:justify-center lg:px-0 lg:py-2 px-2.5 py-2 justify-between" : "justify-between px-2.5 py-2",
+          isCollapsed
+            ? "lg:justify-center lg:px-0 lg:py-2.5 px-2.5 py-2 justify-between"
+            : "justify-between px-2.5 py-2",
           isActive
             ? "bg-gradient-to-r from-blue-50 to-violet-50/70 text-blue-700 font-semibold"
             : "text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium"
@@ -239,13 +231,21 @@ export function Sidebar({
             className="absolute -left-2.5 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-gradient-to-b from-blue-600 to-violet-600"
           />
         )}
-        <div className={cn("flex items-center min-w-0", isCollapsed ? "lg:gap-0 gap-2.5" : "gap-2.5")}>
+        <div
+          className={cn(
+            "relative flex items-center min-w-0",
+            isCollapsed ? "lg:gap-0 gap-2.5" : "gap-2.5"
+          )}
+        >
           <Icon
             className={cn(
               "w-4 h-4 shrink-0 transition-colors duration-150",
               isActive ? "text-blue-600" : "text-slate-400 group-hover:text-slate-600"
             )}
           />
+          {isCollapsed && item.highlightUnread && (
+            <span className="hidden lg:block absolute -top-1 -right-1 w-2 h-2 rounded-full bg-blue-600 ring-2 ring-white" />
+          )}
           <span className={cn("truncate", isCollapsed && "lg:hidden")}>{item.label}</span>
         </div>
 
@@ -254,9 +254,11 @@ export function Sidebar({
             className={cn(
               "text-[11px] kpi-number px-1.5 py-0.5 rounded-md font-semibold shrink-0",
               isCollapsed && "lg:hidden",
-              isActive
-                ? "bg-blue-100 text-blue-700"
-                : "bg-slate-100 text-slate-600 border border-slate-200"
+              item.highlightUnread
+                ? "bg-blue-600 text-white"
+                : isActive
+                  ? "bg-blue-100 text-blue-700"
+                  : "bg-slate-100 text-slate-600 border border-slate-200"
             )}
           >
             {item.badge}
@@ -278,8 +280,12 @@ export function Sidebar({
       {tip && (
         <div
           role="tooltip"
-          className="hidden lg:block fixed z-[80] left-[76px] pointer-events-none rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white shadow-floating animate-fade-in"
-          style={{ top: tip.top }}
+          className="hidden lg:block fixed z-[80] left-[76px] pointer-events-none rounded-md px-2.5 py-1.5 text-xs font-medium shadow-floating animate-fade-in"
+          style={{
+            top: tip.top,
+            backgroundColor: "#0f172a",
+            color: "#ffffff",
+          }}
         >
           {tip.label}
         </div>
@@ -287,16 +293,33 @@ export function Sidebar({
 
       <aside
         className={cn(
-          "fixed top-0 bottom-0 left-0 z-50 w-[244px] bg-white border-r border-slate-200 flex flex-col transition-[width,transform] duration-200 ease-in-out lg:static lg:translate-x-0 select-none shrink-0",
+          "fixed top-0 bottom-0 left-0 z-50 w-[244px] bg-white border-r border-slate-200 flex flex-col transition-[width,transform] duration-200 ease-in-out lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 select-none shrink-0",
           isCollapsed ? "lg:w-[68px]" : "lg:w-[244px]",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
+        {/* Floating Edge Expand/Collapse Button (Always visible on desktop border!) */}
+        <button
+          type="button"
+          onClick={toggleCollapse}
+          aria-label={isCollapsed ? "Mở rộng menu điều hướng" : "Thu gọn menu điều hướng"}
+          title={isCollapsed ? "Mở rộng menu" : "Thu gọn menu"}
+          className="hidden lg:flex items-center justify-center absolute -right-3 top-[16px] z-30 w-6 h-6 rounded-full bg-white border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-400 shadow-card transition-colors cursor-pointer"
+        >
+          {isCollapsed ? (
+            <ChevronRight className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronLeft className="w-3.5 h-3.5" />
+          )}
+        </button>
+
         {/* Top Brand Bar (h-14 aligned with Header) */}
         <div
           className={cn(
             "h-14 flex items-center border-b border-slate-200/80 shrink-0",
-            isCollapsed ? "lg:justify-center lg:px-2 justify-between px-3.5" : "justify-between px-3.5"
+            isCollapsed
+              ? "lg:justify-center lg:px-2 justify-between px-3.5"
+              : "justify-between px-3.5"
           )}
         >
           <button
@@ -356,6 +379,27 @@ export function Sidebar({
           </button>
         </div>
 
+        {/* Dedicated Top Expand Button when collapsed so users immediately see how to open menu */}
+        {isCollapsed && (
+          <div className="hidden lg:flex justify-center px-2.5 pt-2.5 pb-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={toggleCollapse}
+              onMouseEnter={(e) =>
+                setTip({
+                  label: "Mở rộng menu",
+                  top: e.currentTarget.getBoundingClientRect().top + 4,
+                })
+              }
+              onMouseLeave={() => setTip(null)}
+              aria-label="Mở rộng menu điều hướng"
+              className="w-full py-2 flex items-center justify-center rounded-lg bg-slate-50 border border-slate-200/80 text-slate-600 hover:text-blue-600 hover:bg-blue-50/60 hover:border-blue-300 transition-colors cursor-pointer"
+            >
+              <PanelLeftOpen className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Navigation Groups */}
         <div className="flex-1 overflow-y-auto px-2.5 py-3 space-y-5">
           {/* Primary: Dashboard */}
@@ -380,12 +424,7 @@ export function Sidebar({
 
           {/* Group: System */}
           <div>
-            <div
-              className={cn(
-                "px-2.5 mb-1.5",
-                isCollapsed && "lg:hidden"
-              )}
-            >
+            <div className={cn("px-2.5 mb-1.5", isCollapsed && "lg:hidden")}>
               <span className="text-[11px] font-semibold tracking-[0.05em] text-slate-400 uppercase">
                 System
               </span>
@@ -402,13 +441,13 @@ export function Sidebar({
         {/* Footer: Role Context & Expand Trigger */}
         <div className="p-2.5 border-t border-slate-200/80 bg-slate-50/40 shrink-0">
           {isCollapsed ? (
-            <div className="hidden lg:flex flex-col items-center gap-2">
+            <div className="hidden lg:flex flex-col items-center">
               <button
                 type="button"
                 onClick={toggleCollapse}
-                className="p-2 text-slate-500 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                className="w-full py-2 flex items-center justify-center text-slate-500 hover:text-blue-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
                 aria-label="Mở rộng thanh điều hướng"
-                title="Mở rộng sidebar"
+                title="Mở rộng menu"
               >
                 <PanelLeftOpen className="w-4 h-4" />
               </button>

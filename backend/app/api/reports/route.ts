@@ -5,10 +5,38 @@ import { prisma } from "@/lib/prisma";
 
 const CreateReportSchema = z.object({
   title: z.string().trim().min(3, "Tiêu đề tối thiểu 3 ký tự").max(200, "Tiêu đề tối đa 200 ký tự"),
-  content: z.string().trim().min(5, "Nội dung báo cáo tối thiểu 5 ký tự").max(50000, "Nội dung báo cáo tối đa 50.000 ký tự"),
+  content: z
+    .string()
+    .trim()
+    .min(5, "Nội dung thông báo / báo cáo tối thiểu 5 ký tự")
+    .max(50000, "Nội dung tối đa 50.000 ký tự"),
   attachmentName: z.string().max(255).optional().nullable(),
   attachmentUrl: z.string().optional().nullable(),
 });
+
+function buildReportVisibilityFilter(user: {
+  userId: string;
+  role: string;
+  actorType?: string;
+}) {
+  const isBoardOrAdmin =
+    user.role === "ADMIN" ||
+    user.role === "DIRECTOR" ||
+    user.actorType === "ADMIN" ||
+    user.actorType === "DIRECTOR";
+
+  if (isBoardOrAdmin) {
+    return {};
+  }
+
+  return {
+    OR: [
+      { createdBy: { role: { in: ["ADMIN", "DIRECTOR"] } } },
+      { createdBy: { actorType: { in: ["ADMIN", "DIRECTOR"] } } },
+      { createdById: user.userId },
+    ],
+  };
+}
 
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser(req);
@@ -20,17 +48,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Phân quyền hiển thị báo cáo:
-    // - ADMIN: Xem được tất cả báo cáo của toàn bộ các phòng ban
-    // - MKT, SALES, DESIGN, ADS,...: Chỉ thấy báo cáo của ADMIN (toàn hệ thống) + báo cáo do chính mình viết
-    const reportFilter = user.role === "ADMIN"
-      ? {}
-      : {
-          OR: [
-            { createdBy: { role: "ADMIN" } },
-            { createdById: user.userId },
-          ],
-        };
+    const reportFilter = buildReportVisibilityFilter(user);
 
     const [reports, unreadCount] = await Promise.all([
       prisma.departmentReport.findMany({
@@ -65,7 +83,10 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error("GET /api/reports error:", error);
     return NextResponse.json(
-      { success: false, error: { code: "INTERNAL_ERROR", message: "Không tải được danh sách báo cáo" } },
+      {
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Không tải được danh sách thông báo & báo cáo" },
+      },
       { status: 500 }
     );
   }
@@ -84,7 +105,13 @@ export async function POST(req: NextRequest) {
     const validation = CreateReportSchema.safeParse(await req.json());
     if (!validation.success) {
       return NextResponse.json(
-        { success: false, error: { code: "VALIDATION_ERROR", message: validation.error.issues[0]?.message || "Thông tin báo cáo không hợp lệ" } },
+        {
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: validation.error.issues[0]?.message || "Thông tin không hợp lệ",
+          },
+        },
         { status: 400 }
       );
     }
@@ -95,20 +122,24 @@ export async function POST(req: NextRequest) {
         content: validation.data.content,
         attachmentName: validation.data.attachmentName || null,
         attachmentUrl: validation.data.attachmentUrl || null,
-        department: user.role,
+        department: user.department || user.role,
         createdById: user.userId,
       },
       include: { createdBy: { select: { name: true, role: true, initials: true } } },
     });
 
-    const isBroadcast = user.role === "ADMIN";
+    const isBroadcast =
+      user.role === "ADMIN" ||
+      user.role === "DIRECTOR" ||
+      user.actorType === "ADMIN" ||
+      user.actorType === "DIRECTOR";
 
     return NextResponse.json(
       {
         success: true,
         message: isBroadcast
-          ? "Đã phát báo cáo / thông báo của Ban Giám Đốc tới toàn hệ thống"
-          : "Đã gửi báo cáo phòng ban lên Ban Giám Đốc thành công",
+          ? "Đã phát thông báo của Ban Giám Đốc / Quản trị tới toàn hệ thống!"
+          : "Đã gửi thông báo & báo cáo lên Ban Giám Đốc thành công!",
         data: { report },
       },
       { status: 201 }
@@ -116,7 +147,51 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("POST /api/reports error:", error);
     return NextResponse.json(
-      { success: false, error: { code: "INTERNAL_ERROR", message: "Không gửi được báo cáo" } },
+      { success: false, error: { code: "INTERNAL_ERROR", message: "Không gửi được thông báo" } },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  const user = await getCurrentUser(req);
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: { code: "UNAUTHORIZED", message: "Vui lòng đăng nhập" } },
+      { status: 401 }
+    );
+  }
+
+  try {
+    const reportFilter = buildReportVisibilityFilter(user);
+    const unreadReports = await prisma.departmentReport.findMany({
+      where: {
+        ...reportFilter,
+        reads: { none: { userId: user.userId } },
+      },
+      select: { id: true },
+    });
+
+    for (const r of unreadReports) {
+      await prisma.departmentReportRead.upsert({
+        where: { reportId_userId: { reportId: r.id, userId: user.userId } },
+        create: { reportId: r.id, userId: user.userId },
+        update: { readAt: new Date() },
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: "Đã đánh dấu đã đọc toàn bộ thông báo!",
+      data: { markedCount: unreadReports.length },
+    });
+  } catch (error) {
+    console.error("PATCH /api/reports error:", error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Không thể đánh dấu đã đọc toàn bộ" },
+      },
       { status: 500 }
     );
   }
