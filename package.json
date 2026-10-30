@@ -1,0 +1,30 @@
+{
+  "name": "toan-trung-marketing-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "Frontend",
+    "Backend",
+    "Database"
+  ],
+  "scripts": {
+    "dev": "concurrently --kill-others --names API,WEB --prefix-colors blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:web": "npm run dev --workspace @toantrung/web",
+    "dev:api": "npm run dev --workspace @toantrung/api",
+    "start": "concurrently --kill-others --names API,WEB --prefix-colors blue,green \"npm:start:api\" \"npm:start:web\"",
+    "start:web": "npm run start --workspace @toantrung/web",
+    "start:api": "npm run start --workspace @toantrung/api",
+    "build:web": "npm run build --workspace @toantrung/web",
+    "build:api": "npm run build --workspace @toantrung/api",
+    "db:generate": "npm run db:generate --workspace @toantrung/database",
+    "db:push": "npm run db:push --workspace @toantrung/database"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "allowScripts": {
+    "@prisma/client@5.22.0": true,
+    "@prisma/engines@5.22.0": true,
+    "prisma@5.22.0": true
+  }
+}

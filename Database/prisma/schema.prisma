@@ -1,0 +1,294 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/sqlite"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         String   @default("SALES") // ADMIN, SALES, MARKETING, DESIGN
+  initials     String   @default("TT")
+  avatar       String?
+  address      String?  // Nơi trú hiện tại
+  hometown     String?  // Quê quán
+  achievements String?  // Thành tích, giải thưởng, dự án tiêu biểu
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignedLeads       Lead[]           @relation("AssignedSales")
+  createdLeads        Lead[]           @relation("CreatedByUser")
+  statusChanges       LeadStatusHistory[]
+  assignmentsGiven    LeadAssignment[] @relation("AssignmentsGiven")
+  assignmentsReceived LeadAssignment[] @relation("AssignmentsReceived")
+  assignedByActions   LeadAssignment[] @relation("AssignedBy")
+  attachmentsUploaded LeadAttachment[]
+  auditLogs           AuditLog[]
+  departmentReports   DepartmentReport[]
+  departmentReportReads DepartmentReportRead[]
+
+  @@index([role])
+  @@index([email])
+}
+
+model ProductCategory {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  leads Lead[]
+}
+
+model Lead {
+  id                  String   @id @default(cuid())
+  code                String   @unique // Ví dụ: TT-LED-2401
+  customerName        String
+  companyName         String
+  phone               String
+  email               String?
+  installationAddress String?
+  location            String   @default("TP. Hồ Chí Minh")
+  product             String
+  categoryId          String
+  source              String   @default("Hotline") // Hotline, Form, Email, Facebook Ads, Google Ads, Website, Giới thiệu, Triển lãm
+  status              String   @default("Vừa nhận thông tin") // Vừa nhận thông tin, Đang soạn báo giá, Đã gửi báo giá, Chốt thành công, Thất bại
+  failureReason       String?  // Bắt buộc nếu status = Thất bại
+  estimatedValue      String?  @default("Đang khảo sát")
+  notes               String?
+  
+  salesPersonId       String?
+  createdById         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  category            ProductCategory     @relation(fields: [categoryId], references: [id])
+  salesPerson         User?               @relation("AssignedSales", fields: [salesPersonId], references: [id])
+  createdBy           User?               @relation("CreatedByUser", fields: [createdById], references: [id])
+
+  statusHistory       LeadStatusHistory[]
+  assignments         LeadAssignment[]
+  attachments         LeadAttachment[]
+  trackingEvents      TrackingEvent[]
+  auditLogs           AuditLog[]
+
+  @@index([phone])
+  @@index([email])
+  @@index([customerName])
+  @@index([companyName])
+  @@index([status])
+  @@index([source])
+  @@index([salesPersonId])
+  @@index([createdAt])
+}
+
+model LeadStatusHistory {
+  id          String   @id @default(cuid())
+  leadId      String
+  fromStatus  String?
+  toStatus    String
+  reason      String?  // Bắt buộc nếu toStatus = Thất bại
+  changedById String?
+  createdAt   DateTime @default(now())
+
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  changedBy   User?    @relation(fields: [changedById], references: [id])
+
+  @@index([leadId])
+  @@index([toStatus])
+  @@index([createdAt])
+}
+
+model LeadAssignment {
+  id           String   @id @default(cuid())
+  leadId       String
+  fromSalesId  String?
+  toSalesId    String
+  reason       String?  // Lý do chuyển bàn giao
+  assignedById String?
+  createdAt    DateTime @default(now())
+
+  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromSales    User?    @relation("AssignmentsGiven", fields: [fromSalesId], references: [id])
+  toSales      User     @relation("AssignmentsReceived", fields: [toSalesId], references: [id])
+  assignedBy   User?    @relation("AssignedBy", fields: [assignedById], references: [id])
+
+  @@index([leadId])
+  @@index([toSalesId])
+  @@index([createdAt])
+}
+
+model LeadAttachment {
+  id           String   @id @default(cuid())
+  leadId       String
+  fileName     String
+  fileUrl      String
+  fileSize     Int?
+  fileType     String   @default("IMAGE") // IMAGE, DRAWING, DOCUMENT
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id])
+
+  @@index([leadId])
+}
+
+model TrackingEvent {
+  id            String   @id @default(cuid())
+  leadId        String?
+  websiteSource String   @default("toantrungtelecom.com")
+  source        String   @default("google")
+  medium        String   @default("cpc")
+  campaign      String?  @default("LED_Outdoor_2026")
+  landingPage   String   @default("/san-pham/man-hinh-led-p3-outdoor")
+  utmParams     String?  // JSON string
+  device        String?  @default("Desktop")
+  ipAddress     String?
+  location      String?  @default("TP. Hồ Chí Minh")
+  createdAt     DateTime @default(now())
+
+  lead          Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([websiteSource])
+  @@index([source])
+  @@index([createdAt])
+}
+
+model MarketingCampaign {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  platform    String   // Google Ads, Facebook Ads, SEO
+  status      String   @default("Active") // Active, Paused, Completed
+  budget      Float    @default(0)
+  spent       Float    @default(0)
+  startDate   DateTime @default(now())
+  endDate     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  performances AdsPerformance[]
+
+  @@index([platform])
+  @@index([status])
+}
+
+model AdsPerformance {
+  id           String            @id @default(cuid())
+  campaignId   String
+  date         DateTime          @default(now())
+  impressions  Int               @default(0)
+  clicks       Int               @default(0)
+  cost         Float             @default(0)
+  conversions  Int               @default(0)
+  cpc          Float             @default(0)
+  ctr          Float             @default(0)
+
+  campaign     MarketingCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([date])
+}
+
+model KeywordMetric {
+  id           String   @id @default(cuid())
+  keyword      String
+  impressions  Int      @default(0)
+  clicks       Int      @default(0)
+  avgCpc       Float    @default(0)
+  avgPosition  Float    @default(1.0)
+  searchVolume Int      @default(0)
+  source       String   @default("Google Ads") // Google Ads, Google Search Console
+  date         DateTime @default(now())
+
+  @@index([keyword])
+  @@index([source])
+}
+
+model SyncJob {
+  id            String    @id @default(cuid())
+  service       String    // GOOGLE_ADS, GA4, SEARCH_CONSOLE
+  status        String    @default("CONNECTED") // CONNECTED, SYNCING, COMPLETED, ERROR, NOT_CONFIGURED
+  lastSyncTime  DateTime?
+  recordsSynced Int       @default(0)
+  errorMessage  String?
+  createdAt     DateTime  @default(now())
+
+  @@index([service])
+}
+
+model BrandSetting {
+  id                String   @id @default("default_brand")
+  brandName         String   @default("TOÀN TRUNG")
+  slogan            String   @default("Giải pháp hiển thị màn hình LED & Viễn thông chuyên nghiệp")
+  logoUrl           String   @default("/logo.png")
+  faviconUrl        String   @default("/favicon.ico")
+  primaryColor      String   @default("#2563EB")
+  supportHotline    String   @default("0909.123.456")
+  loginWelcomeTitle String   @default("Chào mừng trở lại")
+  loginWelcomeDesc  String   @default("")
+  loginBgUrl        String   @default("")
+  updatedAt         DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  leadId    String?
+  action    String   // CREATE_LEAD, UPDATE_LEAD, CHANGE_STATUS, ASSIGN_SALES, LOGIN, LOGOUT, BRAND_UPDATE
+  entity    String   // LEAD, USER, AUTH, BRAND
+  entityId  String?
+  details   String?  // JSON string
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id])
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([leadId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model DepartmentReport {
+  id             String   @id @default(cuid())
+  title          String
+  content        String
+  department     String
+  attachmentName String?
+  attachmentUrl  String?
+  createdById    String
+  createdAt      DateTime @default(now())
+
+  createdBy User                  @relation(fields: [createdById], references: [id])
+  reads     DepartmentReportRead[]
+
+  @@index([createdAt])
+  @@index([department])
+}
+
+model DepartmentReportRead {
+  id        String   @id @default(cuid())
+  reportId  String
+  userId    String
+  readAt    DateTime @default(now())
+
+  report DepartmentReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, userId])
+  @@index([userId])
+}
