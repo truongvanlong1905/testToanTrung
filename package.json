@@ -3,11 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "Frontend",
-    "Backend",
-    "Database"
+    "frontend",
+    "backend",
+    "database"
   ],
   "scripts": {
+    "predev": "npm run db:generate",
     "dev": "concurrently --kill-others --names API,WEB --prefix-colors blue,green \"npm:dev:api\" \"npm:dev:web\"",
     "dev:web": "npm run dev --workspace @toantrung/web",
     "dev:api": "npm run dev --workspace @toantrung/api",

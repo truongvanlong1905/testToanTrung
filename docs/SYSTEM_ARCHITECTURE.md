@@ -21,8 +21,8 @@ graph TD
     end
     
     subgraph "Data & External Layer"
-        Prisma --> SQLite["Database/data/source.sqlite"]
-        Routes --> Uploads["Backend/public/uploads"]
+        Prisma --> SQLite["database/data/source.sqlite"]
+        Routes --> Uploads["backend/public/uploads"]
     end
 ```
 
@@ -32,9 +32,9 @@ graph TD
 
 ```
 diua/
-├── Frontend/              # Giao diện và proxy cùng origin
-├── Backend/               # API, xác thực, nghiệp vụ và upload
-├── Database/              # Prisma schema/client và SQLite local
+├── frontend/              # Giao diện và proxy cùng origin
+├── backend/               # API, xác thực, nghiệp vụ và upload
+├── database/              # Prisma schema/client và SQLite local
 ├── docs/
 └── PROJECT_HANDOFF.md
 ```

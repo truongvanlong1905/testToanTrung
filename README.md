@@ -4,9 +4,9 @@ Repository được tổ chức thành ba workspace có thể chạy/build/tri�
 
 | Workspace | Trách nhiệm | Địa chỉ local |
 |---|---|---|
-| `Frontend` | Giao diện Next.js | `http://localhost:3001` |
-| `Backend` | API, xác thực và upload | `http://localhost:3002` |
-| `Database` | Schema SQLite/Prisma dùng chung cho local | `Database/data/source.sqlite` |
+| `frontend` | Giao diện Next.js | `http://localhost:3001` |
+| `backend` | API, xác thực và upload | `http://localhost:3002` |
+| `database` | Schema SQLite/Prisma dùng chung cho local | `database/data/source.sqlite` |
 
 Web proxy `/api/*` và `/uploads/*` tới API để trình duyệt tiếp tục dùng cùng origin,
 giữ nguyên xác thực bằng HttpOnly cookie. Xem [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
@@ -16,21 +16,24 @@ và [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) trước khi cấu hình.
 
 1. Cài Node.js 20.9 trở lên (khuyến nghị Node.js 22 LTS).
 2. Tạo file môi trường riêng từ mẫu:
-   - `Frontend/.env.example` → `Frontend/.env.local`
-   - `Backend/.env.example` → `Backend/.env.local`
-   - `Database/.env.example` → `Database/.env`
-3. Đặt `API_BASE_URL` trong `Frontend/.env.local`; đặt cùng một `JWT_SECRET` ngẫu nhiên
-   dài tối thiểu 32 ký tự trong cấu hình web/API. SQLite ở `Database/data/source.sqlite`
+   - `frontend/.env.example` → `frontend/.env.local`
+   - `backend/.env.example` → `backend/.env.local`
+   - `database/.env.example` → `database/.env`
+3. Đặt `API_BASE_URL` trong `frontend/.env.local`; đặt cùng một `JWT_SECRET` ngẫu nhiên
+   dài tối thiểu 32 ký tự trong cấu hình web/API. SQLite ở `database/data/source.sqlite`
    được dùng trực tiếp.
    Không commit file môi trường hoặc gửi credentials trong chat.
-4. Chạy `npm ci` và `npm run db:generate`. Không chạy `db:push` trên file dữ liệu nguồn.
-5. Khởi chạy cả frontend và backend trong một terminal:
+4. Chạy `npm ci` một lần để cài dependencies. Không chạy `db:push` trên file dữ liệu nguồn.
+5. Từ thư mục `diua`, khởi chạy toàn bộ bằng một lệnh:
 
    ```powershell
    npm run dev
    ```
 
-SQLite được dùng trực tiếp tại `Database/data/source.sqlite`; không cần server database
+Lệnh này tự tạo Prisma client, sau đó chạy API và frontend cùng lúc. Mở
+`http://localhost:3001`; API chạy tại `http://localhost:3002`.
+
+SQLite được dùng trực tiếp tại `database/data/source.sqlite`; không cần server database
 riêng để chạy local. Không chạy seed demo lên file này vì seed có thể thay dữ liệu.
 
 ## Lệnh workspace

@@ -1,0 +1,211 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme variables (--page, --surface, --slate-*, --bg-*, --tx-*, --bd-* …) are generated from
+   tailwind.config.ts and switched by <html class="dark">. Nothing below hardcodes a theme colour. */
+
+html {
+  font-size: 16px;
+}
+
+body {
+  color: rgb(var(--slate-900));
+  background: rgb(var(--page));
+  font-family: "Inter", "Be Vietnam Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+.font-heading {
+  font-family: "Inter", "Be Vietnam Pro", -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* Page canvas: flat page colour + a very soft brand tint behind the page header (no blur, no animation) */
+.app-canvas,
+.bg-gumloop-grid {
+  background-color: rgb(var(--page));
+  background-image: linear-gradient(180deg, rgb(var(--primary) / 0.07) 0, rgb(var(--primary) / 0) 340px);
+  background-repeat: no-repeat;
+}
+
+html.dark .app-canvas,
+html.dark .bg-gumloop-grid {
+  background-image: linear-gradient(180deg, rgb(var(--primary) / 0.14) 0, rgb(var(--primary) / 0) 380px);
+}
+
+::selection {
+  background: rgb(var(--primary) / 0.28);
+}
+
+/* Form primitives */
+@layer components {
+  .crm-input {
+    @apply h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-900 placeholder:text-slate-400 transition-colors duration-150 hover:border-slate-300 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60;
+  }
+
+  .crm-select {
+    @apply h-9 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-700 transition-colors duration-150 hover:border-slate-300 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  /* A filter control that currently narrows the data: tinted so "what is filtered" is obvious */
+  .crm-select-active {
+    @apply border-blue-300 bg-blue-50 text-blue-700 font-semibold;
+  }
+
+  .crm-textarea {
+    @apply w-full rounded-lg border border-slate-200 bg-white p-3 text-[13px] text-slate-900 placeholder:text-slate-400 transition-colors duration-150 hover:border-slate-300 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .crm-label {
+    @apply mb-1.5 block text-[12.5px] font-medium text-slate-700;
+  }
+
+  .crm-card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-card;
+  }
+
+  /* Card that reacts to pointer (clickable KPI) */
+  .crm-card-interactive {
+    @apply rounded-xl border border-slate-200 bg-white shadow-card transition-[border-color,box-shadow,transform] duration-150 hover:border-blue-300 hover:shadow-subtle active:translate-y-px cursor-pointer;
+  }
+
+  /* ---------- Semantic typography scale ---------- */
+  .text-page-title {
+    @apply text-[22px] font-semibold leading-tight tracking-[-0.022em] text-slate-900;
+  }
+  .text-section-title {
+    @apply text-[15px] font-semibold leading-snug tracking-[-0.012em] text-slate-900;
+  }
+  .text-card-title {
+    @apply text-sm font-semibold leading-snug text-slate-900;
+  }
+  .text-body {
+    @apply text-[13px] leading-relaxed text-slate-600;
+  }
+  .text-caption {
+    @apply text-xs leading-normal text-slate-500;
+  }
+  .text-overline {
+    @apply text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500;
+  }
+
+  /* ---------- Unified data table ----------
+     :where() keeps specificity at a single class so per-cell utilities still win. */
+  .crm-table {
+    @apply w-full border-collapse text-left;
+  }
+  .crm-table :where(thead th) {
+    @apply sticky top-0 z-[1] h-10 whitespace-nowrap border-b border-slate-200 bg-slate-100 px-4 py-0 align-middle text-[11px] font-semibold uppercase tracking-[0.05em] text-slate-500;
+  }
+  .crm-table :where(tbody td) {
+    @apply h-12 px-4 py-2.5 align-middle text-[13px] text-slate-700;
+  }
+  .crm-table :where(tbody tr) {
+    @apply border-b border-slate-100 transition-colors duration-100 last:border-b-0 hover:bg-blue-50/60;
+  }
+  .crm-table :where(.num) {
+    @apply text-right tabular-nums;
+  }
+
+  /* Toolbar row above tables / lists */
+  .crm-toolbar {
+    @apply flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-card lg:flex-row lg:items-center lg:justify-between;
+  }
+
+  /* Skeleton block with soft shimmer */
+  .skeleton {
+    @apply rounded bg-slate-100;
+    background-image: linear-gradient(90deg, rgb(var(--surface) / 0) 0, rgb(var(--surface) / 0.7) 50%, rgb(var(--surface) / 0) 100%);
+    background-size: 400px 100%;
+    background-repeat: no-repeat;
+    animation: shimmer 1.4s linear infinite;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+/* Tabular numbers for balanced KPI and table alignment */
+.kpi-number {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Keyboard focus ring for every interactive element (mouse clicks stay clean) */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid rgb(var(--tx-blue-600) / 0.75);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Native controls follow the theme */
+select option {
+  background-color: rgb(var(--surface));
+  color: rgb(var(--slate-900));
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: rgb(var(--slate-900));
+  box-shadow: 0 0 0 1000px rgb(var(--surface)) inset;
+  transition: background-color 9999s ease-out 0s;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: rgb(var(--primary));
+}
+
+/* Minimal custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--slate-300));
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--slate-400));
+}
+
+/* Respect users who disable motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Lock page scroll while a modal / sheet is open */
+body.overflow-locked {
+  overflow: hidden;
+}

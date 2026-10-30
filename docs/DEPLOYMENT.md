@@ -2,9 +2,9 @@
 
 ## Cấu trúc triển khai
 
-- `Frontend`: Next.js frontend, mặc định cổng 3001.
-- `Backend`: Next.js API, mặc định cổng 3002.
-- `Database`: Prisma SQLite schema/client và file dữ liệu local.
+- `frontend`: Next.js frontend, mặc định cổng 3001.
+- `backend`: Next.js API, mặc định cổng 3002.
+- `database`: Prisma SQLite schema/client và file dữ liệu local.
 - Web cần `API_BASE_URL`; cấu hình proxy giúp cookie xác thực tiếp tục cùng origin.
 - API dùng SQLite ở local; `JWT_SECRET` là bắt buộc, `GEMINI_API_KEY` tùy chọn.
 - Upload hiện lưu trên filesystem của API. Production phải gắn persistent volume hoặc
@@ -15,9 +15,9 @@
 Tạo file local từ từng mẫu:
 
 ```powershell
-Copy-Item Frontend\.env.example Frontend\.env.local
-Copy-Item Backend\.env.example Backend\.env.local
-Copy-Item Database\.env.example Database\.env
+Copy-Item frontend\.env.example frontend\.env.local
+Copy-Item backend\.env.example backend\.env.local
+Copy-Item database\.env.example database\.env
 ```
 
 Tạo secret JWT riêng (không dùng ví dụ cố định):
@@ -27,9 +27,9 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
 Đặt cùng `JWT_SECRET` trong web và API, mỗi giá trị dài ít nhất 32 ký tự. Đặt
-`API_BASE_URL` trong `Frontend/.env.local`. API cần một đường dẫn SQLite tuyệt đối
-trỏ tới `Database/data/source.sqlite`, ví dụ `DATABASE_URL="file:D:/project/Database/data/source.sqlite"`.
-Trong `Database/.env`, Prisma CLI có thể dùng URL tương đối trong mẫu. Không commit
+`API_BASE_URL` trong `frontend/.env.local`. API cần một đường dẫn SQLite tuyệt đối
+trỏ tới `database/data/source.sqlite`, ví dụ `DATABASE_URL="file:D:/project/database/data/source.sqlite"`.
+Trong `database/.env`, Prisma CLI có thể dùng URL tương đối trong mẫu. Không commit
 `.env*`, passwords, tokens hoặc API keys.
 
 ## Cài đặt database local
@@ -39,14 +39,14 @@ npm install
 npm run db:generate
 ```
 
-SQLite hiện có được dùng trực tiếp; file `Database/data/source.sqlite` chứa dữ liệu
+SQLite hiện có được dùng trực tiếp; file `database/data/source.sqlite` chứa dữ liệu
 nghiệp vụ. Không chạy `db:push` hoặc `db:seed` trên file này. Cần backup file trước
 khi thay đổi schema hoặc dữ liệu. Có thể lập kế hoạch chuyển PostgreSQL riêng khi
 chuẩn bị deploy production.
 
 ## Chạy và build
 
-Chạy API và web trong một terminal:
+Từ thư mục gốc dự án, chạy API và web trong một terminal. Lệnh tự tạo Prisma client:
 
 ```powershell
 npm run dev

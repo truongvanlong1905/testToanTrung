@@ -13,4 +13,4 @@
 
 Các bước login, `/api/auth/me` và `/` cần trả HTTP 200. Không gửi `.env`, cookie,
 token hoặc mật khẩu khi báo lỗi. Database SQLite runtime nằm tại
-`Database/data/source.sqlite`.
+`database/data/source.sqlite`.

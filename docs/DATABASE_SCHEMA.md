@@ -1,5 +1,5 @@
 # SƠ ĐỒ CƠ SỞ DỮ LIỆU TOÀN TRUNG – MARKETING MANAGEMENT
-*Runtime hiện tại: Prisma ORM + SQLite (`Database/data/source.sqlite`)*
+*Runtime hiện tại: Prisma ORM + SQLite (`database/data/source.sqlite`)*
 
 ---
 

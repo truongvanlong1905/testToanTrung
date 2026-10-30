@@ -4,7 +4,7 @@
 
 - Frontend: Next.js, cổng `3001`.
 - Backend API: Next.js, cổng `3002`.
-- Database: SQLite tại `Database/data/source.sqlite`, được giữ nguyên; không chạy
+- Database: SQLite tại `database/data/source.sqlite`, được giữ nguyên; không chạy
   migration hoặc seed trong lần kiểm tra này.
 - Database có 15 bảng; hiện có 7 user, 5 danh mục, 4 chiến dịch và 4 tracking event.
   Bảng Lead hiện không có bản ghi, vì vậy danh sách Lead rỗng là trạng thái dữ liệu,

@@ -1,16 +1,16 @@
 # Kiến trúc và ranh giới chỉnh sửa
 
 ```text
-Frontend/                       Giao diện Next.js, cổng 3001
+frontend/                       Giao diện Next.js, cổng 3001
   app/                           Các trang
   components/                    UI theo layout, lead, views
   proxy.ts                       Bảo vệ trang/session
-Backend/                        API Next.js, cổng 3002
+backend/                         API Next.js, cổng 3002
   app/api/                       HTTP handlers
   backend/services/              Logic nghiệp vụ phía server
   proxy.ts                       Bảo vệ API
   public/uploads/                Tệp upload; production cần storage bền vững
-Database/                       Schema SQLite, Prisma client và file dữ liệu
+database/                        Schema SQLite, Prisma client và file dữ liệu
   prisma/schema.prisma           SQLite schema
   data/source.sqlite             Local database
   src/index.ts                   Prisma client dùng chung
@@ -18,11 +18,11 @@ Database/                       Schema SQLite, Prisma client và file dữ liệ
 
 ## Sửa ở đâu?
 
-- Giao diện/layout: `Frontend/components/` và `Frontend/app/`.
-- Hợp đồng HTTP, status code, cookie: `Backend/app/api/<module>/route.ts`.
-- Logic nghiệp vụ tái sử dụng: `Backend/backend/services/<module>/`.
-- Schema, client và thao tác dữ liệu: `Database/`.
-- Proxy web tới API: `Frontend/next.config.mjs`.
+- Giao diện/layout: `frontend/components/` và `frontend/app/`.
+- Hợp đồng HTTP, status code, cookie: `backend/app/api/<module>/route.ts`.
+- Logic nghiệp vụ tái sử dụng: `backend/backend/services/<module>/`.
+- Schema, client và thao tác dữ liệu: `database/`.
+- Proxy web tới API: `frontend/next.config.mjs`.
 
 Web proxy `/api/*` và `/uploads/*` server-side tới API. Trình duyệt chỉ giao tiếp với
 web origin nên giữ được session cookie cùng origin. Có thể deploy web và API riêng:

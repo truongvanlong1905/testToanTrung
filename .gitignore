@@ -3,9 +3,9 @@ node_modules/
 out/
 build/
 coverage/
-Database/generated/
+database/generated/
 **/tsconfig.tsbuildinfo
-Backend/public/uploads/
+backend/public/uploads/
 
 .env
 .env.*
