@@ -84,20 +84,12 @@ export async function POST(req: NextRequest) {
     clearLoginRateLimit(`ip:${ip}`);
     clearLoginRateLimit(`email:${normalizedEmail}`);
 
-    const dbUser = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: {
-        actorType: true,
-        department: true,
-        position: true,
-      },
-    });
-
+    const userRecord = user as Record<string, unknown>;
     const resolved = resolveActorAndDept({
       role: user.role,
-      actorType: dbUser?.actorType,
-      department: dbUser?.department,
-      position: dbUser?.position,
+      actorType: typeof userRecord.actorType === "string" ? userRecord.actorType : undefined,
+      department: typeof userRecord.department === "string" ? userRecord.department : undefined,
+      position: typeof userRecord.position === "string" ? userRecord.position : undefined,
     });
 
     const sessionPayload: UserSession = {
@@ -113,16 +105,20 @@ export async function POST(req: NextRequest) {
 
     const token = signToken(sessionPayload);
 
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        action: "LOGIN",
-        entity: "AUTH",
-        entityId: user.id,
-        ipAddress: ip,
-        userAgent: req.headers.get("user-agent"),
-      },
-    });
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          action: "LOGIN",
+          entity: "AUTH",
+          entityId: user.id,
+          ipAddress: ip,
+          userAgent: req.headers.get("user-agent"),
+        },
+      });
+    } catch (auditErr) {
+      console.warn("Login audit log skipped:", auditErr);
+    }
 
     const response = NextResponse.json({
       success: true,

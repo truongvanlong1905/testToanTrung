@@ -131,24 +131,19 @@ export async function getCurrentUser(request?: Request): Promise<UserSession | n
     // Kiểm tra trạng thái thực tế trong DB để chống dùng lại token cũ khi tài khoản đã khóa hoặc đổi quyền
     const dbUser = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        actorType: true,
-        department: true,
-        position: true,
-        initials: true,
-        isActive: true,
-      },
     });
 
     if (!dbUser || !dbUser.isActive) {
       return null;
     }
 
-    const resolved = resolveActorAndDept(dbUser);
+    const dbUserRecord = dbUser as Record<string, unknown>;
+    const resolved = resolveActorAndDept({
+      role: dbUser.role,
+      actorType: typeof dbUserRecord.actorType === "string" ? dbUserRecord.actorType : undefined,
+      department: typeof dbUserRecord.department === "string" ? dbUserRecord.department : undefined,
+      position: typeof dbUserRecord.position === "string" ? dbUserRecord.position : undefined,
+    });
 
     return {
       userId: dbUser.id,
