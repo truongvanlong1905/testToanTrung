@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED !== "true") {
     throw new Error("Demo seed data is disabled in production. Provision production users and data separately.");
   }
 
@@ -233,9 +233,10 @@ async function main() {
     },
   ];
 
-  await prisma.keywordMetric.deleteMany();
-  for (const kw of keywords) {
-    await prisma.keywordMetric.create({ data: kw });
+  if ((await prisma.keywordMetric.count()) === 0) {
+    for (const kw of keywords) {
+      await prisma.keywordMetric.create({ data: kw });
+    }
   }
 
   // 5. Seed Tracking Events
@@ -282,9 +283,10 @@ async function main() {
     },
   ];
 
-  await prisma.trackingEvent.deleteMany();
-  for (const tr of trackingData) {
-    await prisma.trackingEvent.create({ data: tr });
+  if ((await prisma.trackingEvent.count()) === 0) {
+    for (const tr of trackingData) {
+      await prisma.trackingEvent.create({ data: tr });
+    }
   }
 
   // 6. Seed Sync Jobs
@@ -309,9 +311,10 @@ async function main() {
     },
   ];
 
-  await prisma.syncJob.deleteMany();
-  for (const sj of syncJobs) {
-    await prisma.syncJob.create({ data: sj });
+  if ((await prisma.syncJob.count()) === 0) {
+    for (const sj of syncJobs) {
+      await prisma.syncJob.create({ data: sj });
+    }
   }
 
   // 7. Seed Brand Setting
@@ -332,7 +335,52 @@ async function main() {
     },
   });
 
-  console.log("🚀 Seed data toàn diện (Users, Campaigns, Keywords, Tracking, Brand) thành công!");
+  // 8. Seed Initial Leads (nếu DB chưa có Lead nào)
+  if ((await prisma.lead.count()) === 0) {
+    const initialLeads = [
+      {
+        code: "TT-LED-2610-0001",
+        customerName: "Truong Van Long",
+        companyName: "royle",
+        phone: "09827420001",
+        email: "long@gmail.com",
+        installationAddress: "lê quang định ",
+        location: "TP. Hồ Chí Minh",
+        product: "màn hình 28inch",
+        categoryId: "cat_led_indoor",
+        source: "Hotline",
+        status: "Đang soạn báo giá",
+        failureReason: null,
+        estimatedValue: "20.000.000",
+        notes: "màn LED",
+        salesPersonId: "usr_sales_02",
+        createdById: "usr_admin_01",
+      },
+      {
+        code: "TT-LED-2610-0002",
+        customerName: "uth",
+        companyName: "uth",
+        phone: "0129329321",
+        email: "long@gmail.com",
+        installationAddress: "13A",
+        location: "TP. Hồ Chí Minh",
+        product: "màn 38inch",
+        categoryId: "cat_led_indoor",
+        source: "Hotline",
+        status: "Thất bại",
+        failureReason: "khách không ứng",
+        estimatedValue: "390.000.000",
+        notes: "",
+        salesPersonId: "usr_design_01",
+        createdById: "usr_admin_01",
+      },
+    ];
+    for (const lead of initialLeads) {
+      await prisma.lead.create({ data: lead });
+    }
+  }
+
+  console.log("🚀 Seed data toàn diện (Users, Campaigns, Keywords, Tracking, Brand, Leads) thành công!");
 }
 
 main()

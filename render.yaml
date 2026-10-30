@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: toantrung-crm
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: ALLOW_DEMO_SEED
+        value: "true"
+      - key: API_BASE_URL
+        value: http://127.0.0.1:3002
+      - key: JWT_SECRET
+        generateValue: true
