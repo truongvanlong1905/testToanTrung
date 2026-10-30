@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser, unauthorizedResponse } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,9 @@ function dayKey(date: Date): string {
  */
 export async function GET(req: NextRequest) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) return unauthorizedResponse();
+
     const { searchParams } = new URL(req.url);
     const from = parseDay(searchParams.get("from"), false);
     const to = parseDay(searchParams.get("to"), true);

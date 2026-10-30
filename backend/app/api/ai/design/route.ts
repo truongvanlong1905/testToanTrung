@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getCurrentUser, unauthorizedResponse } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -45,7 +46,10 @@ function getProviderError(payload: unknown, fallback: string): string {
   return typeof message === "string" ? message : fallback;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const user = await getCurrentUser(req);
+  if (!user) return unauthorizedResponse();
+
   return NextResponse.json({
     success: true,
     data: {
@@ -57,6 +61,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const user = await getCurrentUser(req);
+  if (!user) return unauthorizedResponse();
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, unauthorizedResponse } from "@/lib/auth";
 
 const SearchQuery = z.string().trim().min(2).max(80);
 
 export async function GET(req: NextRequest) {
+  const user = await getCurrentUser(req);
+  if (!user) return unauthorizedResponse();
+
   const parsed = SearchQuery.safeParse(req.nextUrl.searchParams.get("q") || "");
   if (!parsed.success) {
     return NextResponse.json({ success: true, data: { results: [] } });
@@ -13,7 +16,12 @@ export async function GET(req: NextRequest) {
 
   const query = parsed.data;
   try {
-    const user = await getCurrentUser(req);
+    const isPrivileged =
+      user.actorType === "ADMIN" ||
+      user.actorType === "DIRECTOR" ||
+      user.role === "ADMIN" ||
+      user.role === "DIRECTOR";
+
     const [leads, campaigns, keywords, users] = await Promise.all([
       prisma.lead.findMany({
         where: {
@@ -44,14 +52,16 @@ export async function GET(req: NextRequest) {
         select: { id: true, keyword: true, source: true },
         take: 4,
       }),
-      user?.role === "ADMIN" ? prisma.user.findMany({
-        where: {
-          isActive: true,
-          OR: [{ name: { contains: query } }, { email: { contains: query } }],
-        },
-        select: { id: true, name: true, email: true, role: true },
-        take: 4,
-      }) : Promise.resolve([]),
+      isPrivileged
+        ? prisma.user.findMany({
+            where: {
+              isActive: true,
+              OR: [{ name: { contains: query } }, { email: { contains: query } }],
+            },
+            select: { id: true, name: true, email: true, role: true },
+            take: 4,
+          })
+        : Promise.resolve([]),
     ]);
 
     const results = [
@@ -76,11 +86,11 @@ export async function GET(req: NextRequest) {
         subtitle: `Từ khóa · ${keyword.source}`,
         tab: "ads",
       })),
-      ...users.map((user) => ({
-        id: user.id,
+      ...users.map((u) => ({
+        id: u.id,
         type: "user",
-        title: user.name,
-        subtitle: `${user.email} · ${user.role}`,
+        title: u.name,
+        subtitle: `${u.email} · ${u.role}`,
         tab: "users",
       })),
     ];

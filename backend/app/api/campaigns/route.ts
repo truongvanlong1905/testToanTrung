@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, unauthorizedResponse } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,7 @@ const CreateCampaignSchema = z.object({
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser(req);
+    if (!user) return unauthorizedResponse();
 
     const [campaigns, keywords] = await Promise.all([
       prisma.marketingCampaign.findMany({
@@ -35,8 +36,14 @@ export async function GET(req: NextRequest) {
     const avgCtr = totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(2) : "0.00";
     const avgCpc = totalClicks > 0 ? Math.round(totalSpent / totalClicks) : 0;
 
-    // Quyền chỉnh sửa: Chỉ người có role ADS hoặc ADMIN
-    const canManageAds = user?.role === "ADS" || user?.role === "ADMIN";
+    // Quyền chỉnh sửa: Người thuộc phòng ADS, DIRECTOR hoặc ADMIN
+    const canManageAds =
+      user.role === "ADS" ||
+      user.department === "ADS" ||
+      user.actorType === "ADMIN" ||
+      user.actorType === "DIRECTOR" ||
+      user.role === "ADMIN" ||
+      user.role === "DIRECTOR";
 
     return NextResponse.json({
       success: true,
@@ -74,7 +81,14 @@ export async function POST(req: NextRequest) {
     }
 
     // CHỈ 1 MÌNH ADS VÀ ADMIN CÓ QUYỀN UPLOAD / TẠO CHIẾN DỊCH
-    if (user.role !== "ADS" && user.role !== "ADMIN") {
+    if (
+      user.role !== "ADS" &&
+      user.department !== "ADS" &&
+      user.actorType !== "ADMIN" &&
+      user.actorType !== "DIRECTOR" &&
+      user.role !== "ADMIN" &&
+      user.role !== "DIRECTOR"
+    ) {
       return NextResponse.json(
         {
           success: false,

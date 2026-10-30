@@ -50,10 +50,10 @@ const DEFAULT_BRAND: BrandConfig = {
 
 const QUICK_ROLES = [
   { role: "ADMIN", label: "Admin", email: "admin@toantrung.vn", password: "Password123@" },
-  { role: "SALES", label: "Sales", email: "tuan.tm@toantrung.vn", password: "Password123@" },
-  { role: "MARKETING", label: "Marketing", email: "mkt@toantrung.vn", password: "Password123@" },
-  { role: "ADS", label: "Ads", email: "mkt@toantrung.vn", password: "Password123@" },
-  { role: "DESIGN", label: "Design", email: "design@toantrung.vn", password: "Password123@" },
+  { role: "DIRECTOR", label: "Giám Đốc", email: "giamdoc@toantrung.vn", password: "Password123@" },
+  { role: "SALES", label: "User: Sales", email: "tuan.tm@toantrung.vn", password: "Password123@" },
+  { role: "MARKETING", label: "User: MKT", email: "marketing@toantrung.vn", password: "Password123@" },
+  { role: "DESIGN", label: "User: Design", email: "design@toantrung.vn", password: "Password123@" },
 ];
 
 const REGISTER_ROLES = [
@@ -209,6 +209,16 @@ function LoginContent() {
       const json = await res.json();
       if (!res.ok || !json.success) {
         setError(json.error?.message || "Đăng ký tài khoản thất bại.");
+        return;
+      }
+
+      if (json.pendingApproval) {
+        setSuccessMsg(
+          json.message ||
+            "Đã gửi yêu cầu đăng ký tài khoản USER! Vui lòng chờ Admin duyệt kích hoạt và phân quyền phòng ban."
+        );
+        setActiveTab("login");
+        setEmail(regEmail.trim().toLowerCase());
         return;
       }
 

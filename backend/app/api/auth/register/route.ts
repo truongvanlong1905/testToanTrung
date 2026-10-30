@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { signToken, SESSION_COOKIE_NAME, UserSession } from "@/lib/auth";
+import { checkLoginRateLimit, recordFailedLoginAttempt } from "@/backend/services/auth/login-rate-limit";
 
 const RegisterSchema = z.object({
   name: z.string().trim().min(2, "Họ và tên phải có ít nhất 2 ký tự").max(100),
@@ -16,6 +16,21 @@ const RegisterSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "127.0.0.1";
+    const rateCheck = checkLoginRateLimit(`register:${ip}`);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "TOO_MANY_REQUESTS",
+            message: `Bạn đã gửi quá nhiều yêu cầu đăng ký. Vui lòng thử lại sau ${rateCheck.waitMinutes} phút.`,
+          },
+        },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const validation = RegisterSchema.safeParse(body);
 
@@ -35,34 +50,33 @@ export async function POST(req: NextRequest) {
     const { name, email, password, phone, role, address, hometown } = validation.data;
     const normalizedEmail = email.toLowerCase();
 
-    // Kiểm tra email đã tồn tại chưa
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
     if (existingUser) {
+      recordFailedLoginAttempt(`register:${ip}`);
       return NextResponse.json(
         {
           success: false,
           error: {
             code: "EMAIL_EXISTS",
-            message: "Địa chỉ Email này đã được đăng ký. Vui lòng đăng nhập hoặc dùng email khác.",
+            message: "Địa chỉ Email này đã được đăng ký. Vui lòng đăng nhập hoặc liên hệ Admin.",
           },
         },
         { status: 400 }
       );
     }
 
-    // Mã hóa mật khẩu
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // Tạo chữ viết tắt (initials)
     const words = name.trim().split(/\s+/).filter(Boolean);
     const initials =
       words.length >= 2
         ? `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase()
         : name.substring(0, 2).toUpperCase() || "TT";
 
+    // Bảo mật ATTT: Tài khoản tự đăng ký luôn thuộc Tác nhân USER, cấp Nhân viên và ở trạng thái CHỜ ADMIN DUYỆT (isActive: false)
     const newUser = await prisma.user.create({
       data: {
         name,
@@ -70,68 +84,55 @@ export async function POST(req: NextRequest) {
         passwordHash,
         phone: phone || null,
         role,
+        actorType: "USER",
+        department: role,
+        position: "Nhân viên",
         initials,
         address: address || null,
         hometown: hometown || null,
-        isActive: true,
+        isActive: false,
       },
       select: {
         id: true,
         name: true,
         email: true,
         role: true,
+        actorType: true,
+        department: true,
+        position: true,
         initials: true,
-        phone: true,
-        address: true,
-        hometown: true,
+        isActive: true,
       },
     });
 
-    // Ghi nhận AuditLog
     await prisma.auditLog.create({
       data: {
         userId: newUser.id,
-        action: "REGISTER",
+        action: "REGISTER_PENDING_APPROVAL",
         entity: "AUTH",
         entityId: newUser.id,
-        details: JSON.stringify({ email: newUser.email, role: newUser.role }),
-        ipAddress: req.headers.get("x-forwarded-for") || "localhost",
+        details: JSON.stringify({
+          email: newUser.email,
+          actorType: "USER",
+          department: newUser.department,
+          isActive: false,
+        }),
+        ipAddress: ip,
         userAgent: req.headers.get("user-agent"),
       },
     });
 
-    // Tự động đăng nhập sau khi đăng ký thành công
-    const sessionPayload: UserSession = {
-      userId: newUser.id,
-      email: newUser.email,
-      name: newUser.name,
-      role: newUser.role as UserSession["role"],
-      initials: newUser.initials,
-    };
-
-    const token = signToken(sessionPayload);
-
-    const response = NextResponse.json(
+    return NextResponse.json(
       {
         success: true,
-        message: "Đăng ký tài khoản thành công!",
+        pendingApproval: true,
+        message:
+          "Đã gửi yêu cầu đăng ký tài khoản USER thành công! Vui lòng liên hệ Quản trị viên (ADMIN) để kích hoạt tài khoản và phân quyền phòng ban trước khi đăng nhập.",
         data: { user: newUser },
       },
       { status: 201 }
     );
-
-    response.cookies.set({
-      name: SESSION_COOKIE_NAME,
-      value: token,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 7 * 24 * 3600,
-    });
-
-    return response;
-  } catch (error: any) {
+  } catch (error) {
     console.error("Register error:", error);
     return NextResponse.json(
       {
@@ -145,4 +146,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

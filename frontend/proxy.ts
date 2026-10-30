@@ -5,8 +5,8 @@ import { SESSION_COOKIE_NAME } from '@/lib/session-constants'
 /** Các path KHÔNG yêu cầu đăng nhập */
 const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/auth/register', '/api/health']
 
-/** Các prefix tài nguyên tĩnh — luôn bỏ qua */
-const STATIC_PREFIXES = ['/_next', '/uploads', '/favicon.ico', '/robots.txt', '/sitemap.xml']
+/** Các prefix tài nguyên tĩnh — đã loại bỏ /uploads để bắt buộc xác thực khi mở file đính kèm nội bộ */
+const STATIC_PREFIXES = ['/_next', '/favicon.ico', '/robots.txt', '/sitemap.xml']
 
 function applySecurityHeaders(res: NextResponse): NextResponse {
   res.headers.set('X-Content-Type-Options', 'nosniff');
@@ -20,7 +20,7 @@ function applySecurityHeaders(res: NextResponse): NextResponse {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Bỏ qua tài nguyên tĩnh
+  // Bỏ qua tài nguyên tĩnh hệ thống
   if (STATIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next()
   }
@@ -44,10 +44,9 @@ export async function proxy(request: NextRequest) {
     return applySecurityHeaders(NextResponse.next())
   }
 
-  // Tất cả route còn lại yêu cầu xác thực
+  // Tất cả route còn lại (bao gồm /api/* và /uploads/*) yêu cầu xác thực
   let token = request.cookies.get(SESSION_COOKIE_NAME)?.value
 
-  // Nếu không có trong request.cookies, thử parse từ raw header cookie
   if (!token) {
     const rawCookie = request.headers.get('cookie') || ''
     const match = rawCookie.match(new RegExp(`(?:^|; )${SESSION_COOKIE_NAME}=([^;]*)`))
@@ -59,15 +58,14 @@ export async function proxy(request: NextRequest) {
   const user = token ? await verifyTokenAtEdge(token) : null
 
   if (!user) {
-    // API route → trả 401 JSON
-    if (pathname.startsWith('/api/')) {
+    if (pathname.startsWith('/api/') || pathname.startsWith('/uploads/')) {
       return applySecurityHeaders(
         NextResponse.json(
           {
             success: false,
             error: {
               code: 'UNAUTHORIZED',
-              message: 'Vui lòng đăng nhập để thực hiện thao tác này',
+              message: 'Vui lòng đăng nhập để truy cập dữ liệu hoặc tài liệu nội bộ',
             },
           },
           { status: 401 }
@@ -75,7 +73,6 @@ export async function proxy(request: NextRequest) {
       )
     }
 
-    // Page route → redirect về /login với returnTo
     const loginUrl = new URL('/login', request.url)
     if (pathname !== '/') {
       loginUrl.searchParams.set('returnTo', pathname)
@@ -88,12 +85,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match tất cả request path NGOẠI TRỪ:
-     * - _next/static (static files)
-     * - _next/image (image optimization)
-     * - favicon.ico
-     */
     '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { signToken, SESSION_COOKIE_NAME, UserSession } from "@/lib/auth";
+import { signToken, resolveActorAndDept, SESSION_COOKIE_NAME, UserSession } from "@/lib/auth";
 import { authenticateUser } from "@/backend/services/auth/authenticate-user";
 import {
   checkLoginRateLimit,
@@ -16,15 +16,15 @@ const LoginSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "127.0.0.1";
-    const rateCheck = checkLoginRateLimit(ip);
-    if (!rateCheck.allowed) {
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "127.0.0.1";
+    const ipRateCheck = checkLoginRateLimit(`ip:${ip}`);
+    if (!ipRateCheck.allowed) {
       return NextResponse.json(
         {
           success: false,
           error: {
             code: "TOO_MANY_REQUESTS",
-            message: `Quá nhiều lần thử đăng nhập thất bại. Vui lòng thử lại sau ${rateCheck.waitMinutes} phút.`,
+            message: `Quá nhiều lần thử đăng nhập thất bại từ địa chỉ mạng này. Vui lòng thử lại sau ${ipRateCheck.waitMinutes} phút.`,
           },
         },
         { status: 429 }
@@ -48,49 +48,82 @@ export async function POST(req: NextRequest) {
     }
 
     const { email, password } = validation.data;
+    const normalizedEmail = email.trim().toLowerCase();
 
-    const user = await authenticateUser(email, password);
+    // Chống Brute-Force theo cả địa chỉ Email (ngăn kẻ tấn công đổi IP liên tục để dò mật khẩu Admin)
+    const emailRateCheck = checkLoginRateLimit(`email:${normalizedEmail}`);
+    if (!emailRateCheck.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "TOO_MANY_REQUESTS",
+            message: `Tài khoản này đang tạm khóa bảo vệ do nhập sai mật khẩu nhiều lần. Vui lòng thử lại sau ${emailRateCheck.waitMinutes} phút.`,
+          },
+        },
+        { status: 429 }
+      );
+    }
+
+    const user = await authenticateUser(normalizedEmail, password);
     if (!user) {
-      recordFailedLoginAttempt(ip);
+      recordFailedLoginAttempt(`ip:${ip}`);
+      recordFailedLoginAttempt(`email:${normalizedEmail}`);
       return NextResponse.json(
         {
           success: false,
           error: {
             code: "INVALID_CREDENTIALS",
-            message: "Email hoặc mật khẩu không chính xác",
+            message: "Email hoặc mật khẩu không chính xác (hoặc tài khoản chưa được Admin kích hoạt)",
           },
         },
         { status: 401 }
       );
     }
 
-    // Đăng nhập thành công -> clear rate limit
-    clearLoginRateLimit(ip);
+    clearLoginRateLimit(`ip:${ip}`);
+    clearLoginRateLimit(`email:${normalizedEmail}`);
 
-    // Tạo JWT Session
+    const dbUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        actorType: true,
+        department: true,
+        position: true,
+      },
+    });
+
+    const resolved = resolveActorAndDept({
+      role: user.role,
+      actorType: dbUser?.actorType,
+      department: dbUser?.department,
+      position: dbUser?.position,
+    });
+
     const sessionPayload: UserSession = {
       userId: user.id,
       email: user.email,
       name: user.name,
-      role: user.role as UserSession["role"],
+      role: resolved.effectiveRole,
+      actorType: resolved.actorType,
+      department: resolved.department,
+      position: resolved.position,
       initials: user.initials,
     };
 
     const token = signToken(sessionPayload);
 
-    // Ghi AuditLog
     await prisma.auditLog.create({
       data: {
         userId: user.id,
         action: "LOGIN",
         entity: "AUTH",
         entityId: user.id,
-        ipAddress: req.headers.get("x-forwarded-for") || "localhost",
+        ipAddress: ip,
         userAgent: req.headers.get("user-agent"),
       },
     });
 
-    // Trả response và set HttpOnly Cookie
     const response = NextResponse.json({
       success: true,
       message: "Đăng nhập thành công",
@@ -99,7 +132,10 @@ export async function POST(req: NextRequest) {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          role: resolved.effectiveRole,
+          actorType: resolved.actorType,
+          department: resolved.department,
+          position: resolved.position,
           initials: user.initials,
           phone: user.phone,
         },
@@ -113,11 +149,11 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 7 * 24 * 3600, // 7 ngày
+      maxAge: 7 * 24 * 3600,
     });
 
     return response;
-  } catch (error: any) {
+  } catch (error) {
     console.error("Login error:", error);
     return NextResponse.json(
       {

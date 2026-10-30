@@ -81,16 +81,30 @@ export function getLeadStatusTone(status: string): BadgeTone {
 export function getRoleMeta(role?: string): { label: string; tone: BadgeTone } {
   switch (role) {
     case "ADMIN":
-      return { label: "Ban Giám Đốc", tone: "info" };
+      return { label: "Quản Trị (ADMIN)", tone: "info" };
+    case "DIRECTOR":
+      return { label: "Giám Đốc", tone: "warning" };
     case "SALES":
-      return { label: "Kinh Doanh", tone: "success" };
+      return { label: "Phòng Kinh Doanh", tone: "success" };
     case "MARKETING":
-      return { label: "Marketing", tone: "info" };
+      return { label: "Phòng Marketing", tone: "info" };
     case "ADS":
-      return { label: "Quảng Cáo", tone: "warning" };
+      return { label: "Bộ Phận Ads", tone: "warning" };
     case "DESIGN":
-      return { label: "Thiết Kế", tone: "neutral" };
+      return { label: "Phòng Thiết Kế", tone: "neutral" };
     default:
-      return { label: role || "Thành viên", tone: "neutral" };
+      return { label: role || "Nhân sự (USER)", tone: "neutral" };
+  }
+}
+
+export function getActorMeta(actorType?: string): { label: string; tone: BadgeTone } {
+  switch (actorType) {
+    case "ADMIN":
+      return { label: "ADMIN", tone: "info" };
+    case "DIRECTOR":
+      return { label: "GIÁM ĐỐC", tone: "warning" };
+    case "USER":
+    default:
+      return { label: "USER", tone: "success" };
   }
 }

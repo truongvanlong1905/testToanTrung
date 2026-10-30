@@ -14,3 +14,4 @@ services:
         value: http://127.0.0.1:3002
       - key: JWT_SECRET
         generateValue: true
+

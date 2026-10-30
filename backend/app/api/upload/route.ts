@@ -1,8 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
+import crypto from "crypto";
 import path from "path";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+
+/**
+ * Kiểm tra chữ ký byte thật (Magic Bytes) để ngăn tải lên mã độc giả danh file ảnh/PDF
+ */
+function hasValidFileSignature(ext: string, buf: Buffer): boolean {
+  if (buf.length < 4) return false;
+  switch (ext) {
+    case ".jpg":
+    case ".jpeg":
+      return buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    case ".png":
+      return buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    case ".gif":
+      return buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38;
+    case ".webp":
+      return (
+        buf.length >= 12 &&
+        buf.toString("ascii", 0, 4) === "RIFF" &&
+        buf.toString("ascii", 8, 12) === "WEBP"
+      );
+    case ".pdf":
+      return buf.toString("ascii", 0, 4) === "%PDF";
+    case ".zip":
+    case ".docx":
+    case ".xlsx":
+      return buf[0] === 0x50 && buf[1] === 0x4b;
+    default:
+      // Các file CAD (.dwg, .dxf) hoặc Office cũ (.doc, .xls): chặn nội dung chứa thẻ script/HTML hoặc thực thi PE (MZ)
+      if (buf[0] === 0x4d && buf[1] === 0x5a) return false; // Windows EXE/DLL
+      const headText = buf.subarray(0, Math.min(buf.length, 512)).toString("utf8").toLowerCase();
+      if (headText.includes("<script") || headText.includes("<?php") || headText.includes("<html")) {
+        return false;
+      }
+      return true;
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,7 +68,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Whitelist các định dạng tệp an toàn cho công việc LED & Báo giá
     const ALLOWED_EXTENSIONS = [
       ".jpg", ".jpeg", ".png", ".webp", ".gif",
       ".pdf", ".doc", ".docx", ".xls", ".xlsx",
@@ -52,7 +88,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Giới hạn 15MB
     const MAX_SIZE = 15 * 1024 * 1024;
     if (file.size > MAX_SIZE) {
       return NextResponse.json(
@@ -66,20 +101,34 @@ export async function POST(req: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // Thư mục lưu trữ: public/uploads
+    if (!hasValidFileSignature(ext, buffer)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "FILE_SIGNATURE_MISMATCH",
+            message: "Nội dung tệp không khớp với định dạng khai báo hoặc chứa mã không an toàn.",
+          },
+        },
+        { status: 400 }
+      );
+    }
+
     const uploadDir = path.join(process.cwd(), "public", "uploads");
     await mkdir(uploadDir, { recursive: true });
 
-    // Tên file an toàn kèm timestamp
-    const baseName = path.basename(file.name, ext).replace(/[^a-zA-Z0-9_-]/g, "_");
-    const uniqueFileName = `${Date.now()}_${baseName}${ext}`;
+    const baseName = path
+      .basename(file.name, ext)
+      .replace(/[^a-zA-Z0-9_-]/g, "_")
+      .slice(0, 50);
+    const randomSuffix = crypto.randomBytes(6).toString("hex");
+    const uniqueFileName = `${Date.now()}_${randomSuffix}_${baseName}${ext}`;
     const filePath = path.join(uploadDir, uniqueFileName);
 
     await writeFile(filePath, buffer);
 
     const fileUrl = `/uploads/${uniqueFileName}`;
 
-    // Xác định loại file
     let fileType = "DOCUMENT";
     if ([".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext)) {
       fileType = "IMAGE";
@@ -87,7 +136,6 @@ export async function POST(req: NextRequest) {
       fileType = "DRAWING";
     }
 
-    // Nếu có leadId, tạo bản ghi LeadAttachment
     let attachment = null;
     if (leadId) {
       attachment = await prisma.leadAttachment.create({
@@ -97,7 +145,7 @@ export async function POST(req: NextRequest) {
           fileUrl,
           fileSize: file.size,
           fileType,
-          uploadedById: user?.userId,
+          uploadedById: user.userId,
         },
       });
     }
@@ -113,7 +161,7 @@ export async function POST(req: NextRequest) {
         attachmentId: attachment?.id,
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Upload error:", error);
     return NextResponse.json(
       {
@@ -124,4 +172,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

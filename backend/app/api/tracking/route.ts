@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser, canAccessAllLeads, unauthorizedResponse } from "@/lib/auth";
 import { z } from "zod";
 
 const requestCounts = new Map<string, { count: number; resetAt: number }>();
@@ -72,13 +73,17 @@ export async function OPTIONS(req: NextRequest) {
   });
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) return unauthorizedResponse();
+    const fullAccess = canAccessAllLeads(user);
+
     const [events, syncJobs, siteStats, totalEvents] = await Promise.all([
       prisma.trackingEvent.findMany({
         include: {
           lead: {
-            select: { id: true, code: true, customerName: true, phone: true },
+            select: { id: true, code: true, customerName: true, phone: fullAccess },
           },
         },
         orderBy: { createdAt: "desc" },

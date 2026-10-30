@@ -17,3 +17,4 @@ run("npm run db:push");
 run("npm run db:seed --workspace @toantrung/database");
 run("npm run build:api");
 run("npm run build:web");
+

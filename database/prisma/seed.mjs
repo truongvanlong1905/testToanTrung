@@ -13,16 +13,31 @@ async function main() {
   const defaultPassword = "Password123@";
   const passwordHash = await bcrypt.hash(defaultPassword, 10);
 
-  // 1. Seed Users (Admin, Sales, Marketing, Design)
+  // 1. Seed Users theo chuẩn 3 Tác nhân ATTT: ADMIN - DIRECTOR - USER (kèm Phòng ban & Chức vụ)
   const usersData = [
     {
       id: "usr_admin_01",
       email: "admin@toantrung.vn",
       passwordHash,
-      name: "Nguyễn Toàn Trung",
+      name: "Nguyễn Toàn Trung (Admin)",
       phone: "0909.123.456",
       role: "ADMIN",
+      actorType: "ADMIN",
+      department: "ADMIN_SYS",
+      position: "Quản trị hệ thống",
       initials: "TT",
+    },
+    {
+      id: "usr_director_01",
+      email: "giamdoc@toantrung.vn",
+      passwordHash,
+      name: "Nguyễn Toàn Trung (Giám Đốc)",
+      phone: "0909.888.999",
+      role: "DIRECTOR",
+      actorType: "DIRECTOR",
+      department: "BOARD",
+      position: "Giám đốc",
+      initials: "GĐ",
     },
     {
       id: "usr_sales_01",
@@ -31,6 +46,10 @@ async function main() {
       name: "Trần Minh Tuấn",
       phone: "0912.334.556",
       role: "SALES",
+      actorType: "USER",
+      department: "SALES",
+      position: "Trưởng phòng",
+      appointedDecisionCode: "QD-BGD-2610-001",
       initials: "MT",
     },
     {
@@ -40,6 +59,9 @@ async function main() {
       name: "Lê Hoàng Cường",
       phone: "0933.445.667",
       role: "SALES",
+      actorType: "USER",
+      department: "SALES",
+      position: "Nhân viên",
       initials: "HC",
     },
     {
@@ -49,6 +71,9 @@ async function main() {
       name: "Phạm Thùy Trang",
       phone: "0977.889.900",
       role: "SALES",
+      actorType: "USER",
+      department: "SALES",
+      position: "Nhân viên",
       initials: "TT",
     },
     {
@@ -58,6 +83,9 @@ async function main() {
       name: "Nguyễn Bảo Ngọc",
       phone: "0944.556.778",
       role: "SALES",
+      actorType: "USER",
+      department: "SALES",
+      position: "Nhân viên",
       initials: "BN",
     },
     {
@@ -67,6 +95,10 @@ async function main() {
       name: "Lê Thu Hà",
       phone: "0966.778.899",
       role: "MARKETING",
+      actorType: "USER",
+      department: "MARKETING",
+      position: "Trưởng ban",
+      appointedDecisionCode: "QD-BGD-2610-002",
       initials: "TH",
     },
     {
@@ -76,6 +108,9 @@ async function main() {
       name: "Đặng Mỹ Linh",
       phone: "0988.112.233",
       role: "DESIGN",
+      actorType: "USER",
+      department: "DESIGN",
+      position: "Nhân viên",
       initials: "ML",
     },
   ];
@@ -87,12 +122,88 @@ async function main() {
         passwordHash: u.passwordHash,
         name: u.name,
         role: u.role,
+        actorType: u.actorType,
+        department: u.department,
+        position: u.position,
+        appointedDecisionCode: u.appointedDecisionCode || null,
         initials: u.initials,
       },
       create: u,
     });
   }
-  console.log("✅ Đã cập nhật 7 Users (Admin, Sales, Marketing, Design)");
+
+  // 1b. Seed Departments (do Admin quản lý)
+  const defaultDepartments = [
+    {
+      code: "SALES",
+      name: "Phòng Kinh Doanh (Sales)",
+      description: "Tiếp nhận Lead, khảo sát công trình LED và lập báo giá dự án",
+    },
+    {
+      code: "MARKETING",
+      name: "Phòng Marketing",
+      description: "Quản lý chiến dịch truyền thông, nội dung và đo lường UTM Tracking",
+    },
+    {
+      code: "DESIGN",
+      name: "Phòng Thiết Kế (Design)",
+      description: "Thiết kế maquette màn hình LED, bản vẽ kỹ thuật và AI Design Studio",
+    },
+    {
+      code: "ADS",
+      name: "Bộ Phận Quảng Cáo (Ads)",
+      description: "Tối ưu ngân sách Google Ads, Facebook Ads và bộ từ khóa chuyển đổi",
+    },
+  ];
+
+  for (const dept of defaultDepartments) {
+    await prisma.department.upsert({
+      where: { code: dept.code },
+      update: { name: dept.name, description: dept.description },
+      create: dept,
+    });
+  }
+
+  // 1c. Seed Thông báo chúc mừng / Quyết định bổ nhiệm mẫu của Giám đốc ký
+  await prisma.promotionDecision.upsert({
+    where: { code: "QD-BGD-2610-001" },
+    update: {},
+    create: {
+      code: "QD-BGD-2610-001",
+      title: "Thông báo chúc mừng bổ nhiệm Trưởng Phòng Kinh Doanh LED",
+      content:
+        "Ban Giám Đốc Công ty Toàn Trung trân trọng chúc mừng nhân sự Trần Minh Tuấn chính thức được bổ nhiệm giữ chức vụ Trưởng phòng tại Phòng Kinh Doanh (SALES) nhờ thành tích xuất sắc trong công tác phát triển dự án màn hình LED hội trường & tòa nhà.",
+      targetUserId: "usr_sales_01",
+      targetDepartment: "SALES",
+      newPosition: "Trưởng phòng",
+      signedById: "usr_director_01",
+      signedByName: "Nguyễn Toàn Trung (Giám Đốc)",
+      status: "APPLIED_BY_ADMIN",
+      appliedByAdminId: "usr_admin_01",
+      appliedAt: new Date(),
+    },
+  });
+
+  await prisma.promotionDecision.upsert({
+    where: { code: "QD-BGD-2610-002" },
+    update: {},
+    create: {
+      code: "QD-BGD-2610-002",
+      title: "Thông báo chúc mừng bổ nhiệm Trưởng Ban Marketing & Truyền Thông",
+      content:
+        "Ban Giám Đốc Công ty Toàn Trung chúc mừng nhân sự Lê Thu Hà được bổ nhiệm giữ chức vụ Trưởng ban tại Phòng Marketing (MARKETING).",
+      targetUserId: "usr_mkt_01",
+      targetDepartment: "MARKETING",
+      newPosition: "Trưởng ban",
+      signedById: "usr_director_01",
+      signedByName: "Nguyễn Toàn Trung (Giám Đốc)",
+      status: "APPLIED_BY_ADMIN",
+      appliedByAdminId: "usr_admin_01",
+      appliedAt: new Date(),
+    },
+  });
+
+  console.log("✅ Đã cập nhật mô hình 3 Tác nhân (ADMIN - DIRECTOR - USER), Phòng ban & Quyết định bổ nhiệm");
 
   // 2. Seed Categories
   const categoriesData = [

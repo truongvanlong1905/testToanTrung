@@ -167,23 +167,27 @@ export function Sidebar({
       label: "Hồ sơ tài khoản",
       icon: User,
     },
-    ...(userRole === "ADMIN"
+    ...(userRole === "ADMIN" || userRole === "DIRECTOR"
       ? [
           {
             id: "users",
-            label: "Quản lý nhân sự",
+            label: "Tác nhân & Bổ nhiệm",
             icon: UserCog,
           },
-          {
-            id: "brand",
-            label: "Thương hiệu",
-            icon: ShieldCheck,
-          },
-          {
-            id: "settings",
-            label: "Cài đặt hệ thống",
-            icon: Settings,
-          },
+          ...(userRole === "ADMIN"
+            ? [
+                {
+                  id: "brand",
+                  label: "Thương hiệu",
+                  icon: ShieldCheck,
+                },
+                {
+                  id: "settings",
+                  label: "Cài đặt hệ thống",
+                  icon: Settings,
+                },
+              ]
+            : []),
         ]
       : []),
   ];

@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, canAccessAllLeads, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) return unauthorizedResponse();
+
     const { id } = await params;
 
     const lead = await prisma.lead.findUnique({
@@ -65,6 +68,19 @@ export async function GET(
       );
     }
 
+    const isOwner =
+      canAccessAllLeads(user) ||
+      !lead.salesPersonId ||
+      lead.salesPersonId === user.userId ||
+      lead.createdById === user.userId;
+
+    const safePhone =
+      isOwner || !lead.phone
+        ? lead.phone
+        : lead.phone.length > 6
+          ? `${lead.phone.slice(0, 4)}***${lead.phone.slice(-3)}`
+          : "***";
+
     return NextResponse.json({
       success: true,
       data: {
@@ -73,8 +89,8 @@ export async function GET(
           code: lead.code,
           customerName: lead.customerName,
           companyName: lead.companyName,
-          phone: lead.phone,
-          email: lead.email || "",
+          phone: safePhone,
+          email: isOwner ? lead.email || "" : lead.email ? "***@***" : "",
           product: lead.product,
           category: lead.category?.name || "LED trong nhà",
           categoryId: lead.categoryId,
@@ -137,6 +153,8 @@ export async function PATCH(
 ) {
   try {
     const user = await getCurrentUser(req);
+    if (!user) return unauthorizedResponse();
+
     const { id } = await params;
     const body = await req.json();
 
@@ -148,6 +166,18 @@ export async function PATCH(
           error: { code: "NOT_FOUND", message: "Không tìm thấy khách hàng" },
         },
         { status: 404 }
+      );
+    }
+
+    const canModify =
+      canAccessAllLeads(user) ||
+      !existing.salesPersonId ||
+      existing.salesPersonId === user.userId ||
+      existing.createdById === user.userId;
+
+    if (!canModify) {
+      return forbiddenResponse(
+        "Chỉ nhân sự phụ trách Lead này hoặc cấp Trưởng phòng / Trưởng ban / Giám đốc / Admin mới được chỉnh sửa"
       );
     }
 

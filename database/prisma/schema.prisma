@@ -14,7 +14,11 @@ model User {
   passwordHash String
   name         String
   phone        String?
-  role         String   @default("SALES") // ADMIN, SALES, MARKETING, DESIGN
+  role         String   @default("SALES") // ADMIN, DIRECTOR, SALES, MARKETING, DESIGN, ADS
+  actorType    String   @default("USER")  // 3 tác nhân chuẩn ATTT: ADMIN, DIRECTOR, USER
+  department   String   @default("SALES") // Phòng ban của USER do Admin tạo/quản lý (SALES, MARKETING, DESIGN, ADS, ...)
+  position     String   @default("Nhân viên") // Chức vụ: Nhân viên, Trưởng nhóm, Phó phòng, Trưởng phòng, Trưởng ban, Giám đốc
+  appointedDecisionCode String? // Mã thông báo chúc mừng / quyết định bổ nhiệm của Giám đốc ký
   initials     String   @default("TT")
   avatar       String?
   address      String?  // Nơi trú hiện tại
@@ -34,9 +38,50 @@ model User {
   auditLogs           AuditLog[]
   departmentReports   DepartmentReport[]
   departmentReportReads DepartmentReportRead[]
+  promotionsReceived  PromotionDecision[] @relation("PromotionTargetUser")
+  promotionsSigned    PromotionDecision[] @relation("PromotionSignedDirector")
+  promotionsApplied   PromotionDecision[] @relation("PromotionAppliedAdmin")
 
   @@index([role])
+  @@index([actorType])
+  @@index([department])
   @@index([email])
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  code        String   @unique // VD: SALES, MARKETING, DESIGN, ADS, TECH_LED...
+  name        String   @unique // VD: Phòng Kinh Doanh, Phòng Thiết Kế...
+  description String?
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PromotionDecision {
+  id               String    @id @default(cuid())
+  code             String    @unique // VD: TB-BGD-2610-01
+  title            String    // Tiêu đề thông báo chúc mừng / Quyết định bổ nhiệm
+  content          String    // Nội dung chúc mừng và giao nhiệm vụ của Giám đốc
+  targetUserId     String
+  targetDepartment String    // Phòng ban bổ nhiệm
+  newPosition      String    // Trưởng phòng, Trưởng ban, Phó phòng, Trưởng nhóm
+  signedById       String    // Giám đốc (DIRECTOR) ký ban hành
+  signedByName     String    // Họ tên Giám đốc ký
+  status           String    @default("SIGNED_BY_DIRECTOR") // SIGNED_BY_DIRECTOR, APPLIED_BY_ADMIN, REVOKED
+  appliedByAdminId String?
+  signedAt         DateTime  @default(now())
+  appliedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  targetUser       User      @relation("PromotionTargetUser", fields: [targetUserId], references: [id], onDelete: Cascade)
+  signedBy         User      @relation("PromotionSignedDirector", fields: [signedById], references: [id])
+  appliedByAdmin   User?     @relation("PromotionAppliedAdmin", fields: [appliedByAdminId], references: [id])
+
+  @@index([targetUserId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model ProductCategory {

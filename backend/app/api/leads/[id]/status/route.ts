@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, canAccessAllLeads, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
 
 export async function PATCH(
   req: NextRequest,
@@ -8,6 +8,8 @@ export async function PATCH(
 ) {
   try {
     const user = await getCurrentUser(req);
+    if (!user) return unauthorizedResponse();
+
     const { id } = await params;
     const body = await req.json();
     const { status, reason } = body;
@@ -50,6 +52,18 @@ export async function PATCH(
           error: { code: "NOT_FOUND", message: "Không tìm thấy khách hàng" },
         },
         { status: 404 }
+      );
+    }
+
+    const canChangeStatus =
+      canAccessAllLeads(user) ||
+      !existing.salesPersonId ||
+      existing.salesPersonId === user.userId ||
+      existing.createdById === user.userId;
+
+    if (!canChangeStatus) {
+      return forbiddenResponse(
+        "Chỉ nhân sự phụ trách Lead này hoặc cấp Trưởng phòng / Trưởng ban / Giám đốc / Admin mới được đổi trạng thái"
       );
     }
 

@@ -2,13 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
+import {
+  getCurrentUser,
+  resolveActorAndDept,
+  isManagerialPosition,
+  unauthorizedResponse,
+  forbiddenResponse,
+} from "@/lib/auth";
 
 const CreateUserSchema = z.object({
-  name: z.string().min(2, "Tên nhân viên tối thiểu 2 ký tự"),
-  email: z.string().email("Email không hợp lệ"),
-  password: z.string().min(6, "Mật khẩu tối thiểu 6 ký tự"),
-  role: z.enum(["ADMIN", "SALES", "MARKETING", "DESIGN", "ADS"]),
+  name: z.string().trim().min(2, "Tên nhân viên tối thiểu 2 ký tự").max(100),
+  email: z.string().trim().email("Email không hợp lệ"),
+  password: z.string().min(6, "Mật khẩu tối thiểu 6 ký tự").max(100),
+  actorType: z.enum(["ADMIN", "DIRECTOR", "USER"]).optional(),
+  department: z.string().trim().min(2).max(40).optional(),
+  position: z.string().trim().max(80).optional(),
+  role: z.string().trim().optional(),
   phone: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   hometown: z.string().optional().nullable(),
@@ -18,13 +27,28 @@ const CreateUserSchema = z.object({
 
 export async function GET(req: NextRequest) {
   try {
+    const session = await getCurrentUser(req);
+    if (!session) {
+      return unauthorizedResponse();
+    }
+
     const { searchParams } = new URL(req.url);
     const role = searchParams.get("role");
+    const actorType = searchParams.get("actorType");
     const includeAll = searchParams.get("all") === "true";
 
-    const whereClause: any = includeAll ? {} : { isActive: true };
+    const isPrivileged =
+      session.actorType === "ADMIN" ||
+      session.actorType === "DIRECTOR" ||
+      session.role === "ADMIN" ||
+      session.role === "DIRECTOR";
+
+    const whereClause: Record<string, unknown> = includeAll && isPrivileged ? {} : { isActive: true };
     if (role) {
       whereClause.role = role;
+    }
+    if (actorType) {
+      whereClause.actorType = actorType;
     }
 
     const users = await prisma.user.findMany({
@@ -33,12 +57,16 @@ export async function GET(req: NextRequest) {
         id: true,
         name: true,
         email: true,
-        phone: true,
+        phone: isPrivileged,
         role: true,
+        actorType: true,
+        department: true,
+        position: true,
+        appointedDecisionCode: true,
         initials: true,
         avatar: true,
-        address: true,
-        hometown: true,
+        address: isPrivileged,
+        hometown: isPrivileged,
         achievements: true,
         isActive: true,
         createdAt: true,
@@ -50,7 +78,8 @@ export async function GET(req: NextRequest) {
       success: true,
       data: { users },
     });
-  } catch (error: any) {
+  } catch (error) {
+    console.error("GET /api/users error:", error);
     return NextResponse.json(
       {
         success: false,
@@ -65,19 +94,13 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getCurrentUser(req);
     if (!session) {
-      return NextResponse.json(
-        { success: false, error: { code: "UNAUTHORIZED", message: "Vui lòng đăng nhập" } },
-        { status: 401 }
-      );
+      return unauthorizedResponse();
     }
-    if (session.role !== "ADMIN") {
-      return NextResponse.json(
-        { success: false, error: { code: "FORBIDDEN", message: "Chỉ Admin mới có thể tạo tài khoản" } },
-        { status: 403 }
-      );
+    if (session.actorType !== "ADMIN" && session.role !== "ADMIN") {
+      return forbiddenResponse("Chỉ Tác nhân ADMIN mới có quyền tạo tài khoản hệ thống");
     }
-    const body = await req.json();
 
+    const body = await req.json();
     const validation = CreateUserSchema.safeParse(body);
     if (!validation.success) {
       return NextResponse.json(
@@ -95,7 +118,6 @@ export async function POST(req: NextRequest) {
     const data = validation.data;
     const normalizedEmail = data.email.toLowerCase();
 
-    // Kiểm tra email tồn tại
     const existing = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
@@ -109,10 +131,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Hash mật khẩu
-    const passwordHash = await bcrypt.hash(data.password, 10);
+    const resolved = resolveActorAndDept({
+      role: data.role,
+      actorType: data.actorType,
+      department: data.department,
+      position: data.position,
+    });
 
-    // Tính initials
+    // Quy tắc ATTT: Tác nhân USER khởi tạo ban đầu là Nhân viên; muốn lên Trưởng phòng/Trưởng ban phải có Quyết định của Giám đốc ký
+    if (resolved.actorType === "USER" && isManagerialPosition(resolved.position)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "DIRECTOR_SIGNATURE_REQUIRED",
+            message:
+              "Theo chuẩn ATTT: Tài khoản USER mới khởi tạo ở cấp 'Nhân viên'. Để cấp quyền Trưởng phòng / Trưởng ban, cần căn cứ vào Thông báo chúc mừng do Giám đốc ký duyệt!",
+          },
+        },
+        { status: 403 }
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(data.password, 10);
     const words = data.name.trim().split(/\s+/);
     const initials =
       words.length >= 2
@@ -124,7 +165,10 @@ export async function POST(req: NextRequest) {
         name: data.name,
         email: normalizedEmail,
         passwordHash,
-        role: data.role,
+        role: resolved.effectiveRole,
+        actorType: resolved.actorType,
+        department: resolved.department,
+        position: resolved.position,
         phone: data.phone || null,
         address: data.address || null,
         hometown: data.hometown || null,
@@ -137,6 +181,10 @@ export async function POST(req: NextRequest) {
         name: true,
         email: true,
         role: true,
+        actorType: true,
+        department: true,
+        position: true,
+        appointedDecisionCode: true,
         phone: true,
         address: true,
         hometown: true,
@@ -148,23 +196,27 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Ghi AuditLog
     await prisma.auditLog.create({
       data: {
-        userId: session?.userId,
+        userId: session.userId,
         action: "CREATE_USER",
         entity: "USER",
         entityId: newUser.id,
-        details: JSON.stringify({ email: newUser.email, role: newUser.role }),
+        details: JSON.stringify({
+          email: newUser.email,
+          actorType: newUser.actorType,
+          department: newUser.department,
+          position: newUser.position,
+        }),
       },
     });
 
     return NextResponse.json({
       success: true,
-      message: `Đã tạo tài khoản cho ${newUser.name} (${newUser.role}) thành công`,
+      message: `Đã tạo tài khoản ${newUser.name} [Tác nhân: ${newUser.actorType} · Phòng: ${newUser.department}] thành công`,
       data: { user: newUser },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("POST /api/users error:", error);
     return NextResponse.json(
       { success: false, error: { code: "INTERNAL_ERROR", message: "Lỗi tạo tài khoản nhân viên" } },

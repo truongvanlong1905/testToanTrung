@@ -2,12 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
+import {
+  getCurrentUser,
+  resolveActorAndDept,
+  isManagerialPosition,
+  unauthorizedResponse,
+  forbiddenResponse,
+} from "@/lib/auth";
 
 const AdminUpdateUserSchema = z.object({
   name: z.string().trim().min(2, "Họ tên tối thiểu 2 ký tự").max(100),
   email: z.string().trim().email("Email không hợp lệ"),
-  role: z.enum(["ADMIN", "SALES", "MARKETING", "DESIGN", "ADS"]),
+  role: z.string().trim().optional(),
+  actorType: z.enum(["ADMIN", "DIRECTOR", "USER"]).optional(),
+  department: z.string().trim().max(40).optional(),
+  position: z.string().trim().max(80).optional(),
+  decisionId: z.string().trim().optional().nullable(),
   phone: z.string().trim().max(20).optional().nullable(),
   address: z.string().trim().max(300).optional().nullable(),
   hometown: z.string().trim().max(200).optional().nullable(),
@@ -24,20 +34,14 @@ async function handleAdminUpdateUser(
   try {
     const session = await getCurrentUser(req);
     if (!session) {
-      return NextResponse.json(
-        { success: false, error: { code: "UNAUTHORIZED", message: "Vui lòng đăng nhập" } },
-        { status: 401 }
-      );
+      return unauthorizedResponse();
     }
 
     const { id } = await params;
+    const isAdmin = session.actorType === "ADMIN" || session.role === "ADMIN";
 
-    // Chỉ ADMIN hoặc chính chủ tài khoản mới được chỉnh sửa
-    if (session.role !== "ADMIN" && session.userId !== id) {
-      return NextResponse.json(
-        { success: false, error: { code: "FORBIDDEN", message: "Chỉ Ban Giám Đốc (Admin) mới có quyền chỉnh sửa tài khoản nhân viên" } },
-        { status: 403 }
-      );
+    if (!isAdmin && session.userId !== id) {
+      return forbiddenResponse("Chỉ Tác nhân ADMIN mới có quyền chỉnh sửa và phân quyền tài khoản nhân sự");
     }
 
     const body = await req.json();
@@ -66,7 +70,6 @@ async function handleAdminUpdateUser(
       );
     }
 
-    // Kiểm tra trùng email với người khác
     if (normalizedEmail !== targetUser.email.toLowerCase()) {
       const existingEmail = await prisma.user.findUnique({ where: { email: normalizedEmail } });
       if (existingEmail && existingEmail.id !== id) {
@@ -77,10 +80,67 @@ async function handleAdminUpdateUser(
       }
     }
 
-    // Nếu không phải ADMIN tự sửa mình thì không cho tự nâng quyền lên ADMIN
-    const finalRole = session.role === "ADMIN" ? data.role : targetUser.role;
+    const resolved = isAdmin
+      ? resolveActorAndDept({
+          role: data.role ?? targetUser.role,
+          actorType: data.actorType ?? targetUser.actorType,
+          department: data.department ?? targetUser.department,
+          position: data.position ?? targetUser.position,
+        })
+      : resolveActorAndDept(targetUser);
 
-    // Mã hóa mật khẩu mới nếu Admin đặt lại mật khẩu
+    let appointedDecisionCode = targetUser.appointedDecisionCode;
+
+    // Kiểm tra chuẩn ATTT: Nếu nâng quyền chức vụ cho USER (Trưởng phòng, Trưởng ban, Phó phòng, Trưởng nhóm)
+    if (
+      isAdmin &&
+      resolved.actorType === "USER" &&
+      isManagerialPosition(resolved.position) &&
+      resolved.position !== targetUser.position
+    ) {
+      const signedDecision = data.decisionId
+        ? await prisma.promotionDecision.findFirst({
+            where: { id: data.decisionId, targetUserId: id },
+          })
+        : await prisma.promotionDecision.findFirst({
+            where: {
+              targetUserId: id,
+              newPosition: resolved.position,
+              status: { in: ["SIGNED_BY_DIRECTOR", "APPLIED_BY_ADMIN"] },
+            },
+            orderBy: { createdAt: "desc" },
+          });
+
+      if (!signedDecision) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: {
+              code: "DIRECTOR_SIGNATURE_REQUIRED",
+              message: `Theo quy định ATTT: Không thể tự nâng chức vụ "${resolved.position}" khi chưa có Thông báo chúc mừng / Quyết định bổ nhiệm được Giám đốc ký duyệt!`,
+            },
+          },
+          { status: 403 }
+        );
+      }
+
+      appointedDecisionCode = signedDecision.code;
+      if (signedDecision.status === "SIGNED_BY_DIRECTOR") {
+        await prisma.promotionDecision.update({
+          where: { id: signedDecision.id },
+          data: {
+            status: "APPLIED_BY_ADMIN",
+            appliedByAdminId: session.userId,
+            appliedAt: new Date(),
+          },
+        });
+      }
+    }
+
+    if (resolved.actorType === "USER" && !isManagerialPosition(resolved.position)) {
+      appointedDecisionCode = null;
+    }
+
     let newPasswordHash: string | undefined;
     if (data.newPassword && data.newPassword.trim().length > 0) {
       if (data.newPassword.trim().length < 6) {
@@ -103,14 +163,18 @@ async function handleAdminUpdateUser(
       data: {
         name: data.name,
         email: normalizedEmail,
-        role: finalRole,
+        role: resolved.effectiveRole,
+        actorType: resolved.actorType,
+        department: resolved.department,
+        position: resolved.position,
+        appointedDecisionCode,
         phone: data.phone || null,
         address: data.address || null,
         hometown: data.hometown || null,
         achievements: data.achievements || null,
         avatar: data.avatar || null,
         initials,
-        ...(typeof data.isActive === "boolean" && session.role === "ADMIN" ? { isActive: data.isActive } : {}),
+        ...(typeof data.isActive === "boolean" && isAdmin ? { isActive: data.isActive } : {}),
         ...(newPasswordHash ? { passwordHash: newPasswordHash } : {}),
       },
       select: {
@@ -118,6 +182,10 @@ async function handleAdminUpdateUser(
         name: true,
         email: true,
         role: true,
+        actorType: true,
+        department: true,
+        position: true,
+        appointedDecisionCode: true,
         phone: true,
         address: true,
         hometown: true,
@@ -138,7 +206,10 @@ async function handleAdminUpdateUser(
         entityId: updatedUser.id,
         details: JSON.stringify({
           email: updatedUser.email,
-          role: updatedUser.role,
+          actorType: updatedUser.actorType,
+          department: updatedUser.department,
+          position: updatedUser.position,
+          appointedDecisionCode: updatedUser.appointedDecisionCode,
           isActive: updatedUser.isActive,
           passwordReset: Boolean(newPasswordHash),
         }),
@@ -150,10 +221,16 @@ async function handleAdminUpdateUser(
       message: `Đã cập nhật thông tin tài khoản "${updatedUser.name}" thành công!`,
       data: { user: updatedUser },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("PATCH /api/users/[id] error:", error);
     return NextResponse.json(
-      { success: false, error: { code: "INTERNAL_ERROR", message: error.message || "Lỗi cập nhật tài khoản" } },
+      {
+        success: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          message: error instanceof Error ? error.message : "Lỗi cập nhật tài khoản",
+        },
+      },
       { status: 500 }
     );
   }
@@ -172,4 +249,3 @@ export async function POST(
 ) {
   return handleAdminUpdateUser(req, context);
 }
-

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, resolveActorAndDept } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(req: NextRequest) {
@@ -26,30 +26,45 @@ export async function GET(req: NextRequest) {
         email: true,
         name: true,
         role: true,
+        actorType: true,
+        department: true,
+        position: true,
+        appointedDecisionCode: true,
         initials: true,
         phone: true,
         avatar: true,
         address: true,
         hometown: true,
         achievements: true,
+        isActive: true,
       },
     });
 
-    if (!user) {
+    if (!user || !user.isActive) {
       return NextResponse.json(
         {
           success: false,
-          error: { code: "USER_NOT_FOUND", message: "Tài khoản không tồn tại" },
+          error: { code: "USER_NOT_FOUND", message: "Tài khoản không tồn tại hoặc đã bị khóa" },
         },
-        { status: 404 }
+        { status: 401 }
       );
     }
 
+    const resolved = resolveActorAndDept(user);
+
     return NextResponse.json({
       success: true,
-      data: { user },
+      data: {
+        user: {
+          ...user,
+          role: resolved.effectiveRole,
+          actorType: resolved.actorType,
+          department: resolved.department,
+          position: resolved.position,
+        },
+      },
     });
-  } catch (error: any) {
+  } catch {
     return NextResponse.json(
       {
         success: false,
@@ -59,4 +74,3 @@ export async function GET(req: NextRequest) {
     );
   }
 }
-

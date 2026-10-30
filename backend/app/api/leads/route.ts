@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, canAccessAllLeads, unauthorizedResponse } from "@/lib/auth";
+
+function maskPhoneIfRestricted(phone: string, allowFull: boolean): string {
+  if (allowFull || !phone) return phone;
+  const digits = phone.trim();
+  if (digits.length <= 6) return "***";
+  return `${digits.slice(0, 4)}***${digits.slice(-3)}`;
+}
 
 const CreateLeadSchema = z.object({
   customerName: z.string().min(2, "Tên khách hàng phải có ít nhất 2 ký tự"),
@@ -32,13 +39,16 @@ const CreateLeadSchema = z.object({
 
 export async function GET(req: NextRequest) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) return unauthorizedResponse();
+
     const { searchParams } = new URL(req.url);
     const search = searchParams.get("search") || "";
     const status = searchParams.get("status") || "all";
     const source = searchParams.get("source") || "all";
     const salesId = searchParams.get("salesId") || "all";
     const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
-    const pageSize = Math.max(1, parseInt(searchParams.get("pageSize") || "8"));
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "8")));
 
     // Build filter
     const where: any = {};
@@ -120,34 +130,43 @@ export async function GET(req: NextRequest) {
       .filter((entry): entry is { name: string; initials: string; count: number } => entry !== null)
       .sort((a, b) => b.count - a.count);
 
+    const hasFullLeadAccess = canAccessAllLeads(user);
+
     return NextResponse.json({
       success: true,
       data: {
-        leads: leads.map((l) => ({
-          id: l.id,
-          code: l.code,
-          customerName: l.customerName,
-          companyName: l.companyName,
-          phone: l.phone,
-          email: l.email || "",
-          product: l.product,
-          category: l.category?.name || "LED trong nhà",
-          categoryId: l.categoryId,
-          source: l.source,
-          status: l.status,
-          failureReason: l.failureReason,
-          estimatedValue: l.estimatedValue || "Đang khảo sát",
-          installationAddress: l.installationAddress || "",
-          location: l.location,
-          notes: l.notes || "",
-          createdAt: l.createdAt.toLocaleDateString("vi-VN"),
-          salesPerson: {
-            id: l.salesPerson?.id,
-            name: l.salesPerson?.name || "Chưa phân công",
-            initials: l.salesPerson?.initials || "TT",
-          },
-          attachmentsCount: l.attachments.length,
-        })),
+        leads: leads.map((l) => {
+          const isOwner =
+            hasFullLeadAccess ||
+            !l.salesPersonId ||
+            l.salesPersonId === user.userId ||
+            l.createdById === user.userId;
+          return {
+            id: l.id,
+            code: l.code,
+            customerName: l.customerName,
+            companyName: l.companyName,
+            phone: maskPhoneIfRestricted(l.phone, isOwner),
+            email: isOwner ? l.email || "" : l.email ? "***@***" : "",
+            product: l.product,
+            category: l.category?.name || "LED trong nhà",
+            categoryId: l.categoryId,
+            source: l.source,
+            status: l.status,
+            failureReason: l.failureReason,
+            estimatedValue: l.estimatedValue || "Đang khảo sát",
+            installationAddress: l.installationAddress || "",
+            location: l.location,
+            notes: l.notes || "",
+            createdAt: l.createdAt.toLocaleDateString("vi-VN"),
+            salesPerson: {
+              id: l.salesPerson?.id,
+              name: l.salesPerson?.name || "Chưa phân công",
+              initials: l.salesPerson?.initials || "TT",
+            },
+            attachmentsCount: l.attachments.length,
+          };
+        }),
         stats: {
           total: totalAll,
           newLeads: newCount,
@@ -179,6 +198,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser(req);
+    if (!user) return unauthorizedResponse();
     const body = await req.json();
 
     const validation = CreateLeadSchema.safeParse(body);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, canAccessAllLeads, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
 
 export async function POST(
   req: NextRequest,
@@ -8,6 +8,8 @@ export async function POST(
 ) {
   try {
     const user = await getCurrentUser(req);
+    if (!user) return unauthorizedResponse();
+
     const { id } = await params;
     const body = await req.json();
     const { newSalesPersonId, reason } = body;
@@ -34,6 +36,17 @@ export async function POST(
           error: { code: "NOT_FOUND", message: "Không tìm thấy khách hàng" },
         },
         { status: 404 }
+      );
+    }
+
+    const canAssign =
+      canAccessAllLeads(user) ||
+      !existingLead.salesPersonId ||
+      existingLead.salesPersonId === user.userId;
+
+    if (!canAssign) {
+      return forbiddenResponse(
+        "Chỉ người đang phụ trách hoặc cấp Trưởng phòng / Trưởng ban / Giám đốc / Admin mới được bàn giao Lead"
       );
     }
 
