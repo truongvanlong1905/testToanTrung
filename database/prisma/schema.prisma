@@ -41,6 +41,8 @@ model User {
   promotionsReceived  PromotionDecision[] @relation("PromotionTargetUser")
   promotionsSigned    PromotionDecision[] @relation("PromotionSignedDirector")
   promotionsApplied   PromotionDecision[] @relation("PromotionAppliedAdmin")
+  leadActivities      LeadActivity[]      @relation("LeadActivityAuthor")
+  leadQuotes          LeadQuote[]         @relation("LeadQuoteAuthor")
 
   @@index([role])
   @@index([actorType])
@@ -111,7 +113,21 @@ model Lead {
   failureReason       String?  // Bắt buộc nếu status = Thất bại
   estimatedValue      String?  @default("Đang khảo sát")
   notes               String?
-  
+
+  // Enterprise Lead Management (SLA, Lead Scoring, LED Sizing & Director Pricing Approval)
+  priorityScore          Int       @default(50)     // 0 - 100
+  priorityTier           String    @default("WARM") // HOT, WARM, COLD
+  nextFollowUpAt         DateTime?                  // Thời hạn SLA / lịch hẹn chăm sóc kế tiếp
+  nextActionNote         String?                    // Việc cần làm tiếp theo (VD: Gọi lại, Khảo sát mặt bằng...)
+  lastContactedAt        DateTime?                  // Thời điểm tương tác gần nhất
+  ledWidth               Float?                     // Chiều ngang màn hình LED (m)
+  ledHeight              Float?                     // Chiều cao màn hình LED (m)
+  ledModuleType          String?                    // Dòng module LED (VD: P2.5 Indoor, P3 Outdoor...)
+  discountPercent        Float?    @default(0)      // Mức chiết khấu đề xuất (%)
+  directorApprovalStatus String    @default("NONE") // NONE, PENDING, APPROVED, REJECTED
+  directorApprovedByName String?
+  directorApprovalNote   String?
+
   salesPersonId       String?
   createdById         String?
   createdAt           DateTime @default(now())
@@ -126,6 +142,8 @@ model Lead {
   attachments         LeadAttachment[]
   trackingEvents      TrackingEvent[]
   auditLogs           AuditLog[]
+  activities          LeadActivity[]
+  quotes              LeadQuote[]
 
   @@index([phone])
   @@index([email])
@@ -133,6 +151,9 @@ model Lead {
   @@index([companyName])
   @@index([status])
   @@index([source])
+  @@index([priorityTier])
+  @@index([nextFollowUpAt])
+  @@index([directorApprovalStatus])
   @@index([salesPersonId])
   @@index([createdAt])
 }
@@ -336,4 +357,48 @@ model DepartmentReportRead {
 
   @@unique([reportId, userId])
   @@index([userId])
+}
+
+model LeadActivity {
+  id             String    @id @default(cuid())
+  leadId         String
+  type           String    @default("CALL") // CALL, ZALO, SURVEY, MEETING, QUOTATION, NOTE
+  summary        String
+  outcome        String?
+  nextFollowUpAt DateTime?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+
+  lead           Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdBy      User?     @relation("LeadActivityAuthor", fields: [createdById], references: [id])
+
+  @@index([leadId])
+  @@index([createdAt])
+}
+
+model LeadQuote {
+  id                  String   @id @default(cuid())
+  code                String   @unique // VD: BG-TT-2610-001
+  leadId              String
+  moduleSpec          String   // VD: Màn hình LED P2.5 Indoor Hội trường
+  widthMeters         Float
+  heightMeters        Float
+  areaSqm             Float
+  unitPriceVnd        Float
+  processorVnd        Float    @default(0)
+  structureInstallVnd Float    @default(0)
+  discountPercent     Float    @default(0)
+  totalVnd            Float
+  warrantyMonths      Int      @default(24)
+  notes               String?
+  status              String   @default("SENT") // DRAFT, SENT, PENDING_DIRECTOR, DIRECTOR_APPROVED
+  approvedByName      String?
+  createdById         String?
+  createdAt           DateTime @default(now())
+
+  lead                Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdBy           User?    @relation("LeadQuoteAuthor", fields: [createdById], references: [id])
+
+  @@index([leadId])
+  @@index([createdAt])
 }

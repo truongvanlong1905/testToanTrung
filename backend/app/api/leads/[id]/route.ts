@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, canAccessAllLeads, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
+import { computeLeadScore, computeLeadSla } from "@/lib/lead-scoring";
 
 export async function GET(
   req: NextRequest,
@@ -55,6 +56,22 @@ export async function GET(
           },
           orderBy: { createdAt: "desc" },
         },
+        activities: {
+          include: {
+            createdBy: {
+              select: { id: true, name: true, initials: true },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        },
+        quotes: {
+          include: {
+            createdBy: {
+              select: { id: true, name: true, initials: true },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        },
       },
     });
 
@@ -81,6 +98,25 @@ export async function GET(
           ? `${lead.phone.slice(0, 4)}***${lead.phone.slice(-3)}`
           : "***";
 
+    const scored = computeLeadScore({
+      status: lead.status,
+      estimatedValue: lead.estimatedValue,
+      installationAddress: lead.installationAddress,
+      email: lead.email,
+      source: lead.source,
+      ledWidth: lead.ledWidth,
+      ledHeight: lead.ledHeight,
+      activitiesCount: lead.activities.length,
+      quotesCount: lead.quotes.length,
+    });
+
+    const sla = computeLeadSla({
+      status: lead.status,
+      createdAt: lead.createdAt,
+      lastContactedAt: lead.lastContactedAt,
+      nextFollowUpAt: lead.nextFollowUpAt,
+    });
+
     return NextResponse.json({
       success: true,
       data: {
@@ -102,6 +138,19 @@ export async function GET(
           location: lead.location,
           notes: lead.notes || "",
           createdAt: lead.createdAt.toLocaleDateString("vi-VN"),
+          priorityScore: scored.score,
+          priorityTier: scored.tier,
+          slaStatus: sla.slaStatus,
+          slaLabel: sla.slaLabel,
+          nextFollowUpAt: lead.nextFollowUpAt ? lead.nextFollowUpAt.toISOString() : null,
+          nextActionNote: lead.nextActionNote || null,
+          ledWidth: lead.ledWidth,
+          ledHeight: lead.ledHeight,
+          ledModuleType: lead.ledModuleType,
+          discountPercent: lead.discountPercent || 0,
+          directorApprovalStatus: lead.directorApprovalStatus || "NONE",
+          directorApprovedByName: lead.directorApprovedByName || null,
+          directorApprovalNote: lead.directorApprovalNote || null,
           salesPerson: {
             id: lead.salesPerson?.id,
             name: lead.salesPerson?.name || "Chưa phân công",
@@ -127,15 +176,44 @@ export async function GET(
             id: att.id,
             fileName: att.fileName,
             fileUrl: att.fileUrl,
-            fileSize: att.fileSize,
+            fileSize: att.fileSize ?? undefined,
             fileType: att.fileType,
             uploadedBy: att.uploadedBy?.name || "Người dùng",
             createdAt: att.createdAt.toLocaleString("vi-VN"),
           })),
+          activities: lead.activities.map((act) => ({
+            id: act.id,
+            type: act.type,
+            summary: act.summary,
+            outcome: act.outcome,
+            nextFollowUpAt: act.nextFollowUpAt ? act.nextFollowUpAt.toISOString() : null,
+            createdBy: act.createdBy?.name || "Hệ thống",
+            createdByInitials: act.createdBy?.initials || "TT",
+            createdAt: act.createdAt.toLocaleString("vi-VN"),
+          })),
+          quotes: lead.quotes.map((q) => ({
+            id: q.id,
+            code: q.code,
+            moduleSpec: q.moduleSpec,
+            widthMeters: q.widthMeters,
+            heightMeters: q.heightMeters,
+            areaSqm: q.areaSqm,
+            unitPriceVnd: q.unitPriceVnd,
+            processorVnd: q.processorVnd,
+            structureInstallVnd: q.structureInstallVnd,
+            discountPercent: q.discountPercent,
+            totalVnd: q.totalVnd,
+            warrantyMonths: q.warrantyMonths,
+            notes: q.notes,
+            status: q.status,
+            approvedByName: q.approvedByName,
+            createdBy: q.createdBy?.name || "Hệ thống",
+            createdAt: q.createdAt.toLocaleString("vi-VN"),
+          })),
         },
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("GET /api/leads/[id] error:", error);
     return NextResponse.json(
       {
@@ -181,6 +259,13 @@ export async function PATCH(
       );
     }
 
+    const parsedNextFollowUp =
+      body.nextFollowUpAt === null
+        ? null
+        : body.nextFollowUpAt && !Number.isNaN(new Date(body.nextFollowUpAt).getTime())
+          ? new Date(body.nextFollowUpAt)
+          : existing.nextFollowUpAt;
+
     const updated = await prisma.lead.update({
       where: { id },
       data: {
@@ -193,12 +278,14 @@ export async function PATCH(
         product: body.product ?? existing.product,
         estimatedValue: body.estimatedValue ?? existing.estimatedValue,
         notes: body.notes ?? existing.notes,
+        nextFollowUpAt: parsedNextFollowUp,
+        nextActionNote: body.nextActionNote !== undefined ? body.nextActionNote : existing.nextActionNote,
       },
     });
 
     await prisma.auditLog.create({
       data: {
-        userId: user?.userId,
+        userId: user.userId,
         leadId: id,
         action: "UPDATE_LEAD",
         entity: "LEAD",
@@ -209,10 +296,10 @@ export async function PATCH(
 
     return NextResponse.json({
       success: true,
-      message: "Cập nhật thông tin thành công",
+      message: "Cập nhật thông tin hồ sơ Lead thành công",
       data: { lead: updated },
     });
-  } catch (error: any) {
+  } catch {
     return NextResponse.json(
       {
         success: false,

@@ -16,6 +16,11 @@ import {
   Copy,
   Check,
   Users2,
+  Flame,
+  Clock,
+  FileSignature,
+  Maximize2,
+  MessageSquareText,
 } from "lucide-react";
 import { Lead, LeadStatus } from "@/types/lead";
 import { parseEstimatedVnd } from "@/lib/lead-value";
@@ -34,8 +39,15 @@ interface LeadTableProps {
   itemsPerPage?: number;
 }
 
-type SortField = "code" | "customerName" | "estimatedValue" | "status" | "createdAt";
+type SortField =
+  | "code"
+  | "customerName"
+  | "priorityScore"
+  | "estimatedValue"
+  | "status"
+  | "createdAt";
 type SortOrder = "asc" | "desc";
+type TriageMode = "all" | "hot" | "sla" | "director";
 
 const STATUS_SORT_RANK: Record<LeadStatus, number> = {
   "Vừa nhận thông tin": 1,
@@ -82,6 +94,60 @@ function parseDateValue(dateStr: string): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function renderScoreBadge(lead: Lead) {
+  const score = lead.priorityScore ?? 35;
+  const tier = lead.priorityTier || (score >= 70 ? "HOT" : score >= 40 ? "WARM" : "COLD");
+
+  if (tier === "HOT") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200/80 text-rose-700 text-[11px] font-semibold kpi-number">
+        <Flame className="w-3 h-3 text-rose-600 shrink-0" />
+        HOT · {score}đ
+      </span>
+    );
+  }
+  if (tier === "WARM") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200/80 text-amber-700 text-[11px] font-semibold kpi-number">
+        WARM · {score}đ
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200/80 text-slate-600 text-[11px] font-medium kpi-number">
+      COLD · {score}đ
+    </span>
+  );
+}
+
+function renderSlaPill(lead: Lead) {
+  const slaStatus = lead.slaStatus || "ON_TRACK";
+  const label = lead.slaLabel || "Đúng tiến độ";
+
+  if (slaStatus === "OVERDUE") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600">
+        <Clock className="w-3 h-3 shrink-0" />
+        <span className="truncate max-w-[140px]">{label}</span>
+      </span>
+    );
+  }
+  if (slaStatus === "DUE_SOON") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-600">
+        <Clock className="w-3 h-3 shrink-0" />
+        <span className="truncate max-w-[140px]">{label}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] text-slate-500">
+      <Clock className="w-3 h-3 text-slate-400 shrink-0" />
+      <span className="truncate max-w-[140px]">{label}</span>
+    </span>
+  );
+}
+
 export function LeadTable({
   leads,
   onSelectLead,
@@ -92,15 +158,15 @@ export function LeadTable({
 }: LeadTableProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [viewMode, setViewMode] = useState<"table" | "kanban">("table");
+  const [triageMode, setTriageMode] = useState<TriageMode>("all");
   const [sortField, setSortField] = useState<SortField | null>(null);
-  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number } | null>(
     null
   );
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // A fixed-position menu would drift from its row on scroll/resize, so close it instead.
   useEffect(() => {
     if (!openMenuId) return;
     const close = () => setOpenMenuId(null);
@@ -140,15 +206,43 @@ export function LeadTable({
     return dupSet;
   }, [leads]);
 
+  // Enterprise Triage Counts
+  const triageCounts = useMemo(() => {
+    let hot = 0;
+    let sla = 0;
+    let director = 0;
+    leads.forEach((l) => {
+      if (l.priorityTier === "HOT" || (l.priorityScore ?? 0) >= 70) hot += 1;
+      if (l.slaStatus === "OVERDUE" || l.slaStatus === "DUE_SOON") sla += 1;
+      if (l.directorApprovalStatus === "PENDING") director += 1;
+    });
+    return { all: leads.length, hot, sla, director };
+  }, [leads]);
+
+  const triagedLeads = useMemo(() => {
+    if (triageMode === "hot") {
+      return leads.filter((l) => l.priorityTier === "HOT" || (l.priorityScore ?? 0) >= 70);
+    }
+    if (triageMode === "sla") {
+      return leads.filter((l) => l.slaStatus === "OVERDUE" || l.slaStatus === "DUE_SOON");
+    }
+    if (triageMode === "director") {
+      return leads.filter((l) => l.directorApprovalStatus === "PENDING");
+    }
+    return leads;
+  }, [leads, triageMode]);
+
   const sortedLeads = useMemo(() => {
-    if (!sortField) return leads;
-    const cloned = [...leads];
+    if (!sortField) return triagedLeads;
+    const cloned = [...triagedLeads];
     cloned.sort((a, b) => {
       let cmp = 0;
       if (sortField === "code") {
         cmp = a.code.localeCompare(b.code, "vi");
       } else if (sortField === "customerName") {
         cmp = a.customerName.localeCompare(b.customerName, "vi");
+      } else if (sortField === "priorityScore") {
+        cmp = (a.priorityScore ?? 0) - (b.priorityScore ?? 0);
       } else if (sortField === "estimatedValue") {
         cmp = parseEstimatedVnd(a.estimatedValue) - parseEstimatedVnd(b.estimatedValue);
       } else if (sortField === "status") {
@@ -159,14 +253,14 @@ export function LeadTable({
       return sortOrder === "asc" ? cmp : -cmp;
     });
     return cloned;
-  }, [leads, sortField, sortOrder]);
+  }, [triagedLeads, sortField, sortOrder]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
       setSortField(field);
-      setSortOrder("asc");
+      setSortOrder(field === "priorityScore" || field === "estimatedValue" ? "desc" : "asc");
     }
     setCurrentPage(1);
   };
@@ -207,7 +301,7 @@ export function LeadTable({
           description={
             hasActiveFilters
               ? "Không có hồ sơ nào khớp với điều kiện lọc hiện tại. Hãy thử thay đổi từ khóa hoặc đặt lại bộ lọc."
-              : "Khởi tạo khách hàng tiềm năng đầu tiên để quản lý tiến độ khảo sát, báo giá và bàn giao Sales."
+              : "Khởi tạo khách hàng tiềm năng đầu tiên để quản lý tiến độ khảo sát, báo giá LED m² và bàn giao Sales."
           }
           action={
             !hasActiveFilters && onCreateLead ? (
@@ -249,35 +343,161 @@ export function LeadTable({
 
   return (
     <div className="space-y-3">
-      {/* Sub-toolbar: Duplicate Status & View Mode Toggle */}
+      {/* Enterprise Triage Bar + Duplicate Check + View Mode Toggle */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs">
-          {duplicateIds.size > 0 ? (
-            <StatusBadge tone="error" dot={false}>
-              <AlertTriangle className="w-3.5 h-3.5 mr-1 inline" />
-              Phát hiện {duplicateIds.size} hồ sơ trùng SĐT hoặc Công ty
-            </StatusBadge>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-slate-500">
-              <Check className="w-3.5 h-3.5 text-emerald-600" />
-              Kiểm tra trùng tự động · Không phát hiện trùng lặp
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setTriageMode("all");
+              setCurrentPage(1);
+            }}
+            className={cn(
+              "h-8 px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer",
+              triageMode === "all"
+                ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+            )}
+          >
+            <span>Tất cả hồ sơ</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded text-[10.5px] kpi-number",
+                triageMode === "all" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+              )}
+            >
+              {triageCounts.all}
             </span>
-          )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTriageMode("hot");
+              setCurrentPage(1);
+            }}
+            className={cn(
+              "h-8 px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer",
+              triageMode === "hot"
+                ? "bg-rose-600 text-white border-rose-600 shadow-xs"
+                : "bg-white text-slate-700 border-slate-200 hover:bg-rose-50/50"
+            )}
+          >
+            <Flame
+              className={cn("w-3.5 h-3.5", triageMode === "hot" ? "text-white" : "text-rose-500")}
+            />
+            <span>Lead Nóng (HOT)</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded text-[10.5px] kpi-number",
+                triageMode === "hot" ? "bg-white/20 text-white" : "bg-rose-50 text-rose-700"
+              )}
+            >
+              {triageCounts.hot}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTriageMode("sla");
+              setCurrentPage(1);
+            }}
+            className={cn(
+              "h-8 px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer",
+              triageMode === "sla"
+                ? "bg-amber-600 text-white border-amber-600 shadow-xs"
+                : "bg-white text-slate-700 border-slate-200 hover:bg-amber-50/50"
+            )}
+          >
+            <Clock
+              className={cn("w-3.5 h-3.5", triageMode === "sla" ? "text-white" : "text-amber-500")}
+            />
+            <span>Cần gọi SLA</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded text-[10.5px] kpi-number",
+                triageMode === "sla" ? "bg-white/20 text-white" : "bg-amber-50 text-amber-700"
+              )}
+            >
+              {triageCounts.sla}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTriageMode("director");
+              setCurrentPage(1);
+            }}
+            className={cn(
+              "h-8 px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer",
+              triageMode === "director"
+                ? "bg-blue-700 text-white border-blue-700 shadow-xs"
+                : "bg-white text-slate-700 border-slate-200 hover:bg-blue-50/50"
+            )}
+          >
+            <FileSignature
+              className={cn(
+                "w-3.5 h-3.5",
+                triageMode === "director" ? "text-white" : "text-blue-600"
+              )}
+            />
+            <span>Chờ GĐ duyệt giá</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded text-[10.5px] kpi-number",
+                triageMode === "director" ? "bg-white/20 text-white" : "bg-blue-50 text-blue-700"
+              )}
+            >
+              {triageCounts.director}
+            </span>
+          </button>
         </div>
 
-        <SegmentedControl
-          size="sm"
-          ariaLabel="Chế độ hiển thị"
-          value={viewMode}
-          onChange={setViewMode}
-          options={[
-            { id: "table", label: "Bảng dữ liệu" },
-            { id: "kanban", label: "Kanban" },
-          ]}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-xs">
+            {duplicateIds.size > 0 ? (
+              <StatusBadge tone="error" dot={false}>
+                <AlertTriangle className="w-3.5 h-3.5 mr-1 inline" />
+                Trùng {duplicateIds.size} SĐT/Đơn vị
+              </StatusBadge>
+            ) : (
+              <span className="hidden xl:inline-flex items-center gap-1.5 text-slate-500">
+                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                Không trùng SĐT
+              </span>
+            )}
+          </div>
+
+          <SegmentedControl
+            size="sm"
+            ariaLabel="Chế độ hiển thị"
+            value={viewMode}
+            onChange={setViewMode}
+            options={[
+              { id: "table", label: "Bảng dữ liệu" },
+              { id: "kanban", label: "Kanban" },
+            ]}
+          />
+        </div>
       </div>
 
-      {viewMode === "table" ? (
+      {triagedLeads.length === 0 ? (
+        <div className="crm-card p-8 text-center space-y-2.5">
+          <p className="text-sm font-semibold text-slate-900">
+            Không có hồ sơ nào trong nhóm phân loại này
+          </p>
+          <p className="text-xs text-slate-500">
+            Tất cả cơ hội hiện tại đã được xử lý đúng hạn SLA hoặc chưa có báo giá chờ Giám đốc ký duyệt.
+          </p>
+          <div className="pt-1">
+            <Button variant="secondary" size="sm" onClick={() => setTriageMode("all")}>
+              Xem lại toàn bộ ({leads.length} hồ sơ)
+            </Button>
+          </div>
+        </div>
+      ) : viewMode === "table" ? (
         <div className="crm-card overflow-hidden animate-fade-in">
           <div className="overflow-x-auto max-h-[640px]">
             <table className="crm-table">
@@ -285,9 +505,10 @@ export function LeadTable({
                 <tr>
                   {renderSortableTh("code", "Mã Lead")}
                   {renderSortableTh("customerName", "Khách hàng & Đơn vị")}
+                  {renderSortableTh("priorityScore", "Điểm & SLA")}
                   <th>Liên hệ</th>
-                  <th>Dự án</th>
-                  {renderSortableTh("estimatedValue", "Giá trị", "num")}
+                  <th>Dự án &amp; Quy cách LED</th>
+                  {renderSortableTh("estimatedValue", "Giá trị & Duyệt giá", "num")}
                   <th>Nguồn</th>
                   {renderSortableTh("status", "Trạng thái")}
                   <th>Sales</th>
@@ -301,6 +522,10 @@ export function LeadTable({
                 {currentLeads.map((lead) => {
                   const isDup = duplicateIds.has(lead.id);
                   const isMenuOpen = openMenuId === lead.id;
+                  const ledArea =
+                    lead.ledWidth && lead.ledHeight
+                      ? Number((lead.ledWidth * lead.ledHeight).toFixed(1))
+                      : null;
 
                   return (
                     <tr
@@ -326,15 +551,29 @@ export function LeadTable({
                             </span>
                           )}
                         </div>
+                        {(lead.activitiesCount ?? 0) > 0 && (
+                          <div className="inline-flex items-center gap-1 text-[10.5px] text-slate-400 mt-1">
+                            <MessageSquareText className="w-3 h-3" />
+                            <span>{lead.activitiesCount} lượt CSKH</span>
+                          </div>
+                        )}
                       </td>
 
                       {/* Customer */}
-                      <td className="py-3 px-4 min-w-[200px]">
+                      <td className="py-3 px-4 min-w-[195px]">
                         <div className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">
                           {lead.customerName}
                         </div>
-                        <div className="text-xs text-slate-500 truncate max-w-[220px] mt-0.5">
+                        <div className="text-xs text-slate-500 truncate max-w-[210px] mt-0.5">
                           {lead.companyName}
+                        </div>
+                      </td>
+
+                      {/* Score & SLA */}
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <div className="flex flex-col items-start gap-1">
+                          {renderScoreBadge(lead)}
+                          {renderSlaPill(lead)}
                         </div>
                       </td>
 
@@ -342,30 +581,61 @@ export function LeadTable({
                       <td className="py-3 px-4 whitespace-nowrap">
                         <span className="font-mono text-xs text-slate-700">{lead.phone}</span>
                         {lead.email && (
-                          <div className="text-[11px] text-slate-400 truncate max-w-[150px] mt-0.5">
+                          <div className="text-[11px] text-slate-400 truncate max-w-[145px] mt-0.5">
                             {lead.email}
                           </div>
                         )}
                       </td>
 
-                      {/* Product */}
-                      <td className="py-3 px-4 min-w-[210px]">
+                      {/* Product & LED Dimensions */}
+                      <td className="py-3 px-4 min-w-[215px]">
                         <div className="font-medium text-slate-800 line-clamp-1">
                           {lead.product}
                         </div>
-                        <div className="text-xs text-slate-500 mt-0.5 truncate max-w-[220px]">
-                          {lead.location}
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mt-0.5">
+                          <span className="truncate max-w-[140px]">{lead.location}</span>
+                          {ledArea && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200/70 text-[10.5px] font-medium kpi-number">
+                              <Maximize2 className="w-2.5 h-2.5" />
+                              {ledArea} m²
+                            </span>
+                          )}
                         </div>
                       </td>
 
-                      {/* Value: always right-aligned; free-text placeholders ("Đang khảo sát") are visually muted */}
+                      {/* Value & Director Approval */}
                       <td className="num py-3 px-4 whitespace-nowrap">
-                        {parseEstimatedVnd(lead.estimatedValue) > 0 ? (
-                          <span className="kpi-number font-semibold text-slate-900">
-                            {lead.estimatedValue}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-500">{lead.estimatedValue || "—"}</span>
+                        <div>
+                          {parseEstimatedVnd(lead.estimatedValue) > 0 ? (
+                            <span className="kpi-number font-semibold text-slate-900">
+                              {lead.estimatedValue}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-500">
+                              {lead.estimatedValue || "—"}
+                            </span>
+                          )}
+                        </div>
+                        {lead.directorApprovalStatus === "PENDING" && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 text-[10.5px] font-semibold">
+                              Chờ GĐ duyệt
+                            </span>
+                          </div>
+                        )}
+                        {lead.directorApprovalStatus === "APPROVED" && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10.5px] font-semibold">
+                              ✓ GĐ đã duyệt
+                            </span>
+                          </div>
+                        )}
+                        {lead.directorApprovalStatus === "REJECTED" && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700 text-[10.5px] font-semibold">
+                              Cần sửa báo giá
+                            </span>
+                          </div>
                         )}
                       </td>
 
@@ -412,8 +682,6 @@ export function LeadTable({
                               setOpenMenuId(null);
                               return;
                             }
-                            // Fixed positioning relative to the viewport: the menu can never be clipped
-                            // by the table's scroll container, and flips upward near the screen bottom.
                             const rect = e.currentTarget.getBoundingClientRect();
                             const upward = window.innerHeight - rect.bottom < 300;
                             setMenuPos({
@@ -449,7 +717,7 @@ export function LeadTable({
                               onClick={() => setOpenMenuId(null)}
                             />
                             <div
-                              className="fixed z-50 w-52 rounded-xl border border-slate-200 bg-elevated shadow-floating p-1 text-left text-xs animate-dropdown-in"
+                              className="fixed z-50 w-56 rounded-xl border border-slate-200 bg-elevated shadow-floating p-1 text-left text-xs animate-dropdown-in"
                               style={{ top: menuPos.top, bottom: menuPos.bottom, right: menuPos.right }}
                               role="menu"
                             >
@@ -462,7 +730,7 @@ export function LeadTable({
                                 className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-slate-700 hover:bg-slate-100 font-medium cursor-pointer"
                               >
                                 <Eye className="w-3.5 h-3.5 text-slate-400" />
-                                Xem chi tiết &amp; Bàn giao
+                                Hồ sơ · Dự toán LED &amp; Báo giá
                               </button>
                               <a
                                 href={`tel:${lead.phone}`}
@@ -606,6 +874,10 @@ export function LeadTable({
                   {colLeads.length > 0 ? (
                     colLeads.map((lead) => {
                       const isDup = duplicateIds.has(lead.id);
+                      const ledArea =
+                        lead.ledWidth && lead.ledHeight
+                          ? Number((lead.ledWidth * lead.ledHeight).toFixed(1))
+                          : null;
                       return (
                         <div
                           key={lead.id}
@@ -624,7 +896,7 @@ export function LeadTable({
                                 Trùng
                               </StatusBadge>
                             ) : (
-                              <span className="text-[11px] text-slate-400">{lead.source}</span>
+                              renderScoreBadge(lead)
                             )}
                           </div>
 
@@ -638,20 +910,33 @@ export function LeadTable({
                           </div>
 
                           <div className="text-xs text-slate-600 line-clamp-2 bg-slate-50 p-2 rounded-md border border-slate-100">
-                            {lead.product}
+                            <span>{lead.product}</span>
+                            {ledArea && (
+                              <span className="ml-1.5 font-semibold text-blue-700">
+                                ({ledArea} m²)
+                              </span>
+                            )}
                           </div>
 
-                          <div className="pt-1 flex items-center justify-between text-xs">
+                          {lead.directorApprovalStatus === "PENDING" && (
+                            <div className="text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                              📋 Chờ Giám đốc duyệt giá
+                            </div>
+                          )}
+
+                          <div>{renderSlaPill(lead)}</div>
+
+                          <div className="pt-1 flex items-center justify-between text-xs border-t border-slate-100">
                             <span className="kpi-number font-semibold text-slate-900">
                               {lead.estimatedValue}
                             </span>
                             <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] text-slate-400 flex items-center gap-0.5">
-                                <MapPin className="w-3 h-3" />
-                                {lead.location}
+                              <span className="text-[11px] text-slate-400 flex items-center gap-0.5 truncate max-w-[95px]">
+                                <MapPin className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{lead.location}</span>
                               </span>
                               <span
-                                className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[9.5px] font-semibold flex items-center justify-center"
+                                className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[9.5px] font-semibold flex items-center justify-center shrink-0"
                                 title={lead.salesPerson.name}
                               >
                                 {lead.salesPerson.initials}

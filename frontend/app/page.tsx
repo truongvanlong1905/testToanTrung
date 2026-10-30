@@ -8,6 +8,7 @@ import {
   Loader2,
   SlidersHorizontal,
   FileSpreadsheet,
+  Upload,
 } from "lucide-react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
@@ -62,6 +63,9 @@ const LeadDetailModal = dynamic(
 );
 const NewLeadModal = dynamic(
   () => import("@/components/modules/leads/NewLeadModal").then((m) => m.NewLeadModal)
+);
+const ImportLeadsModal = dynamic(
+  () => import("@/components/modules/leads/ImportLeadsModal").then((m) => m.ImportLeadsModal)
 );
 
 function parseLeadCreatedAt(dateStr: string): Date | null {
@@ -128,6 +132,7 @@ export default function LeadsDashboardPage() {
   // Modals state
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
+  const [isImportLeadsOpen, setIsImportLeadsOpen] = useState(false);
 
   // Toast feedback state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -429,6 +434,15 @@ export default function LeadsDashboardPage() {
                     <Button
                       variant="secondary"
                       size="md"
+                      onClick={() => setIsImportLeadsOpen(true)}
+                      leftIcon={<Upload className="w-3.5 h-3.5 text-blue-600" />}
+                    >
+                      Import &amp; Chia Sales
+                    </Button>
+
+                    <Button
+                      variant="secondary"
+                      size="md"
                       isLoading={isExportingLeads}
                       disabled={!hasLoadedLeads}
                       leftIcon={<FileSpreadsheet className="w-4 h-4 text-emerald-600" />}
@@ -598,6 +612,8 @@ export default function LeadsDashboardPage() {
           onClose={() => setSelectedLead(null)}
           onUpdateStatus={handleUpdateStatus}
           onReassignSales={handleReassignSales}
+          currentUserRole={currentUser?.role}
+          onLeadMutated={() => void fetchLeads()}
         />
       )}
 
@@ -606,6 +622,17 @@ export default function LeadsDashboardPage() {
           isOpen={isNewLeadOpen}
           onClose={() => setIsNewLeadOpen(false)}
           onAddLead={handleAddLead}
+        />
+      )}
+
+      {isImportLeadsOpen && (
+        <ImportLeadsModal
+          isOpen={isImportLeadsOpen}
+          onClose={() => setIsImportLeadsOpen(false)}
+          onImported={(msg) => {
+            showToast(msg);
+            void fetchLeads();
+          }}
         />
       )}
     </div>

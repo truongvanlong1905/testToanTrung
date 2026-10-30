@@ -451,39 +451,57 @@ async function main() {
     const initialLeads = [
       {
         code: "TT-LED-2610-0001",
-        customerName: "Truong Van Long",
-        companyName: "royle",
-        phone: "09827420001",
-        email: "long@gmail.com",
-        installationAddress: "lê quang định ",
+        customerName: "Nguyễn Hoàng Bách",
+        companyName: "Tập đoàn Xây dựng Hòa Bình",
+        phone: "0908123888",
+        email: "bach.nh@hoabinhcorp.vn",
+        installationAddress: "235 Võ Thị Sáu, Quận 3, TP.HCM",
         location: "TP. Hồ Chí Minh",
-        product: "màn hình 28inch",
+        product: "Màn hình LED P1.86 Phòng họp Hội đồng Quản trị",
         categoryId: "cat_led_indoor",
-        source: "Hotline",
+        source: "Website",
         status: "Đang soạn báo giá",
         failureReason: null,
-        estimatedValue: "20.000.000",
-        notes: "màn LED",
-        salesPersonId: "usr_sales_02",
+        estimatedValue: "294.120.000 đ",
+        notes: "Yêu cầu tần số quét 3840Hz, thi công ngoài giờ hành chính cuối tuần.",
+        salesPersonId: "usr_sales_01",
         createdById: "usr_admin_01",
+        priorityScore: 88,
+        priorityTier: "HOT",
+        ledWidth: 4.8,
+        ledHeight: 2.5,
+        ledModuleType: "LED P1.86 Indoor Phòng họp VIP (Cabinet nhôm đúc)",
+        discountPercent: 10,
+        directorApprovalStatus: "PENDING",
+        nextFollowUpAt: new Date(Date.now() + 3 * 3600 * 1000),
+        nextActionNote: "Chờ Giám đốc duyệt chiết khấu 10% để gửi bản PDF chốt hợp đồng",
       },
       {
         code: "TT-LED-2610-0002",
-        customerName: "uth",
-        companyName: "uth",
-        phone: "0129329321",
-        email: "long@gmail.com",
-        installationAddress: "13A",
+        customerName: "Trần Thanh Tùng",
+        companyName: "Trung tâm Hội nghị White Palace",
+        phone: "0913889977",
+        email: "tung.tt@whitepalace.com.vn",
+        installationAddress: "194 Hoàng Văn Thụ, Phú Nhuận, TP.HCM",
         location: "TP. Hồ Chí Minh",
-        product: "màn 38inch",
+        product: "Màn hình LED P2.5 Hội trường Sảnh Đại Yến",
         categoryId: "cat_led_indoor",
         source: "Hotline",
-        status: "Thất bại",
-        failureReason: "khách không ứng",
-        estimatedValue: "390.000.000",
-        notes: "",
-        salesPersonId: "usr_design_01",
+        status: "Đã gửi báo giá",
+        failureReason: null,
+        estimatedValue: "182.500.000 đ",
+        notes: "Khách đã chốt mặt bằng, cần tiến độ bàn giao trong 7 ngày.",
+        salesPersonId: "usr_sales_02",
         createdById: "usr_admin_01",
+        priorityScore: 82,
+        priorityTier: "HOT",
+        ledWidth: 4.0,
+        ledHeight: 2.5,
+        ledModuleType: "LED P2.5 Indoor Hội trường & Tiệc cưới",
+        discountPercent: 0,
+        directorApprovalStatus: "NONE",
+        nextFollowUpAt: new Date(Date.now() + 18 * 3600 * 1000),
+        nextActionNote: "Gọi xác nhận lịch ký hợp đồng & tạm ứng đợt 1 (50%)",
       },
     ];
     for (const lead of initialLeads) {
@@ -491,7 +509,61 @@ async function main() {
     }
   }
 
-  console.log("🚀 Seed data toàn diện (Users, Campaigns, Keywords, Tracking, Brand, Leads) thành công!");
+  // 9. Seed Báo giá LED m² & Nhật ký CSKH doanh nghiệp mẫu (nếu chưa có bản báo giá nào)
+  if ((await prisma.leadQuote.count()) === 0) {
+    const firstLead = await prisma.lead.findFirst({ orderBy: { createdAt: "asc" } });
+    if (firstLead) {
+      await prisma.leadQuote.create({
+        data: {
+          code: "BG-TT-2610-001",
+          leadId: firstLead.id,
+          moduleSpec: "LED P1.86 Indoor Phòng họp VIP (Cabinet nhôm đúc)",
+          widthMeters: 4.8,
+          heightMeters: 2.5,
+          areaSqm: 12.0,
+          unitPriceVnd: 24000000,
+          processorVnd: 16500000,
+          structureInstallVnd: 22300000,
+          discountPercent: 10,
+          totalVnd: 294120000,
+          warrantyMonths: 36,
+          notes: "Bao gồm hệ khung nhôm định hình CNC siêu mỏng & Bộ xử lý Novastar VX600.",
+          status: "PENDING_DIRECTOR",
+          createdById: "usr_sales_01",
+        },
+      });
+
+      await prisma.leadActivity.create({
+        data: {
+          leadId: firstLead.id,
+          type: "SURVEY",
+          summary:
+            "Đã khảo sát thực tế mặt bằng phòng họp VIP: vách bê tông chịu lực tốt, kích thước chuẩn 4.8m × 2.5m (12m²), tủ điện 3 pha cách 8m.",
+          outcome: "Khách đề nghị mức chiết khấu dự án 10% — Đã lập báo giá trình Giám đốc phê duyệt.",
+          nextFollowUpAt: new Date(Date.now() + 4 * 3600 * 1000),
+          createdById: "usr_sales_01",
+        },
+      });
+
+      await prisma.lead.update({
+        where: { id: firstLead.id },
+        data: {
+          ledWidth: 4.8,
+          ledHeight: 2.5,
+          ledModuleType: "LED P1.86 Indoor Phòng họp VIP (Cabinet nhôm đúc)",
+          discountPercent: 10,
+          estimatedValue: "294.120.000 đ",
+          directorApprovalStatus: "PENDING",
+          priorityScore: 88,
+          priorityTier: "HOT",
+          nextFollowUpAt: new Date(Date.now() + 4 * 3600 * 1000),
+          nextActionNote: "Trình Giám đốc duyệt báo giá BG-TT-2610-001 (CK 10%)",
+        },
+      });
+    }
+  }
+
+  console.log("🚀 Seed data toàn diện (Users, Campaigns, Keywords, Tracking, Brand, Leads, Quotes) thành công!");
 }
 
 main()

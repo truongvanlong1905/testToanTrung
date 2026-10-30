@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, canAccessAllLeads, unauthorizedResponse } from "@/lib/auth";
+import { computeLeadScore, computeLeadSla } from "@/lib/lead-scoring";
 
 function maskPhoneIfRestricted(phone: string, allowFull: boolean): string {
   if (allowFull || !phone) return phone;
@@ -100,6 +101,7 @@ export async function GET(req: NextRequest) {
             },
           },
           attachments: true,
+          _count: { select: { activities: true, quotes: true } },
         },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * pageSize,
@@ -141,6 +143,23 @@ export async function GET(req: NextRequest) {
             !l.salesPersonId ||
             l.salesPersonId === user.userId ||
             l.createdById === user.userId;
+          const scored = computeLeadScore({
+            status: l.status,
+            estimatedValue: l.estimatedValue,
+            installationAddress: l.installationAddress,
+            email: l.email,
+            source: l.source,
+            ledWidth: l.ledWidth,
+            ledHeight: l.ledHeight,
+            activitiesCount: l._count.activities,
+            quotesCount: l._count.quotes,
+          });
+          const sla = computeLeadSla({
+            status: l.status,
+            createdAt: l.createdAt,
+            lastContactedAt: l.lastContactedAt,
+            nextFollowUpAt: l.nextFollowUpAt,
+          });
           return {
             id: l.id,
             code: l.code,
@@ -159,6 +178,20 @@ export async function GET(req: NextRequest) {
             location: l.location,
             notes: l.notes || "",
             createdAt: l.createdAt.toLocaleDateString("vi-VN"),
+            priorityScore: scored.score,
+            priorityTier: scored.tier,
+            slaStatus: sla.slaStatus,
+            slaLabel: sla.slaLabel,
+            nextFollowUpAt: l.nextFollowUpAt ? l.nextFollowUpAt.toISOString() : null,
+            nextActionNote: l.nextActionNote || null,
+            ledWidth: l.ledWidth,
+            ledHeight: l.ledHeight,
+            ledModuleType: l.ledModuleType,
+            discountPercent: l.discountPercent || 0,
+            directorApprovalStatus: l.directorApprovalStatus || "NONE",
+            directorApprovedByName: l.directorApprovedByName || null,
+            activitiesCount: l._count.activities,
+            quotesCount: l._count.quotes,
             salesPerson: {
               id: l.salesPerson?.id,
               name: l.salesPerson?.name || "Chưa phân công",
@@ -249,6 +282,15 @@ export async function POST(req: NextRequest) {
     const sequence = String(countTotal + 1).padStart(4, "0");
     const code = `TT-LED-${yearMonth}-${sequence}`;
 
+    const scoredNew = computeLeadScore({
+      status: data.status,
+      estimatedValue: data.estimatedValue,
+      installationAddress: data.installationAddress,
+      email: data.email,
+      source: data.source,
+    });
+    const slaDeadline = new Date(now.getTime() + 2 * 3_600_000);
+
     // Tạo Lead trong Database
     const newLead = await prisma.lead.create({
       data: {
@@ -267,6 +309,10 @@ export async function POST(req: NextRequest) {
         createdById: user?.userId,
         estimatedValue: data.estimatedValue || "Đang khảo sát",
         notes: data.notes || "",
+        priorityScore: scoredNew.score,
+        priorityTier: scoredNew.tier,
+        nextFollowUpAt: slaDeadline,
+        nextActionNote: "Gọi tiếp nhận & xác nhận quy cách màn hình LED (SLA 2h)",
         // Đính kèm attachments nếu có
         attachments: data.attachments && data.attachments.length > 0
           ? {
