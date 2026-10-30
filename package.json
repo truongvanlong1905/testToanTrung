@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "predev": "node scripts/predev.mjs",
-    "dev": "concurrently --kill-others --names API,WEB --prefix-colors blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev": "node scripts/dev.mjs",
     "dev:web": "npm run dev --workspace @toantrung/web",
     "dev:api": "npm run dev --workspace @toantrung/api",
     "build": "node scripts/cloud-build.mjs",
