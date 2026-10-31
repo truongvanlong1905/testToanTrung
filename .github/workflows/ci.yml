@@ -1,0 +1,41 @@
+name: Toàn Trung CRM — CI Build & Typecheck
+
+on:
+  push:
+    branches:
+      - main
+      - feat/gumloop-ui-redesign
+  pull_request:
+    branches:
+      - main
+      - feat/gumloop-ui-redesign
+  workflow_dispatch:
+
+jobs:
+  build-and-verify:
+    name: Build & Verify (Database + API + Web)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare Tailwind CSS & Prisma Client
+        run: node scripts/predev.mjs
+
+      - name: Typecheck Frontend & Backend
+        run: |
+          ./node_modules/.bin/tsc -p frontend/tsconfig.json --noEmit
+          ./node_modules/.bin/tsc -p backend/tsconfig.json --noEmit
+
+      - name: Build Full-Stack Application (DB + API + Web)
+        run: npm run build
