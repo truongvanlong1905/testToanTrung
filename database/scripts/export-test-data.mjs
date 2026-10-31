@@ -28,7 +28,7 @@ async function exportTestData() {
     prisma.marketingCampaign.findMany({ orderBy: { code: "asc" } }),
     prisma.keywordMetric.findMany({ orderBy: { id: "asc" } }),
     prisma.trackingEvent.findMany({ orderBy: { id: "asc" } }),
-    prisma.lead.findMany({ orderBy: { code: "asc" } }),
+    prisma.lead.findMany({ orderBy: { code: "asc" }, include: { attachments: true } }),
     prisma.leadQuote.findMany({ orderBy: { code: "asc" } }),
     prisma.leadActivity.findMany({ orderBy: { id: "asc" } }),
     prisma.departmentReport.findMany({ orderBy: { createdAt: "asc" } }),
@@ -45,6 +45,7 @@ async function exportTestData() {
     position: u.position,
     appointedDecisionCode: u.appointedDecisionCode,
     initials: u.initials,
+    avatar: u.avatar,
     achievements: u.achievements,
   }));
 
@@ -135,6 +136,14 @@ async function exportTestData() {
     salesPersonId: l.salesPersonId,
     createdById: l.createdById,
     createdAt: l.createdAt ? l.createdAt.toISOString() : new Date().toISOString(),
+    attachments: (l.attachments || []).map((att) => ({
+      id: att.id,
+      fileName: att.fileName,
+      fileUrl: att.fileUrl,
+      fileSize: att.fileSize,
+      fileType: att.fileType,
+      uploadedById: att.uploadedById,
+    })),
   }));
 
   const cleanQuotes = quotes.map((q) => ({

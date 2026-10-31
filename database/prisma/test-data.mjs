@@ -15,6 +15,7 @@ export const TEST_USERS = [
     "position": "Quản trị hệ thống",
     "appointedDecisionCode": null,
     "initials": "TT",
+    "avatar": "/uploads/1793367126647_2.jpg",
     "achievements": "Top 1 sever"
   },
   {
@@ -28,6 +29,7 @@ export const TEST_USERS = [
     "position": "Trưởng phòng",
     "appointedDecisionCode": "QD-BGD-2610-001",
     "initials": "MT",
+    "avatar": null,
     "achievements": null
   },
   {
@@ -41,6 +43,7 @@ export const TEST_USERS = [
     "position": "Nhân viên",
     "appointedDecisionCode": null,
     "initials": "HC",
+    "avatar": null,
     "achievements": null
   },
   {
@@ -54,6 +57,7 @@ export const TEST_USERS = [
     "position": "Nhân viên",
     "appointedDecisionCode": null,
     "initials": "TT",
+    "avatar": null,
     "achievements": null
   },
   {
@@ -67,6 +71,7 @@ export const TEST_USERS = [
     "position": "Nhân viên",
     "appointedDecisionCode": null,
     "initials": "BN",
+    "avatar": null,
     "achievements": null
   },
   {
@@ -80,6 +85,7 @@ export const TEST_USERS = [
     "position": "Trưởng ban",
     "appointedDecisionCode": "QD-BGD-2610-002",
     "initials": "TH",
+    "avatar": null,
     "achievements": null
   },
   {
@@ -93,6 +99,7 @@ export const TEST_USERS = [
     "position": "Nhân viên",
     "appointedDecisionCode": null,
     "initials": "ML",
+    "avatar": null,
     "achievements": null
   },
   {
@@ -106,6 +113,7 @@ export const TEST_USERS = [
     "position": "Giám đốc",
     "appointedDecisionCode": null,
     "initials": "GĐ",
+    "avatar": null,
     "achievements": null
   }
 ];
@@ -338,7 +346,17 @@ export const TEST_LEADS = [
     "directorApprovalStatus": "NONE",
     "salesPersonId": "usr_sales_02",
     "createdById": "usr_admin_01",
-    "createdAt": "2026-10-29T20:03:18.463Z"
+    "createdAt": "2026-10-29T20:03:18.463Z",
+    "attachments": [
+      {
+        "id": "cmvtz0ncv000hbzpbdpn6x6wx",
+        "fileName": "1111.jpg",
+        "fileUrl": "/uploads/1793304190710_1111.jpg",
+        "fileSize": 45023,
+        "fileType": "IMAGE",
+        "uploadedById": "usr_admin_01"
+      }
+    ]
   },
   {
     "id": "cmvuqj1c2000b7g1jsjgwhpcz",
@@ -367,7 +385,8 @@ export const TEST_LEADS = [
     "directorApprovalStatus": "NONE",
     "salesPersonId": "usr_design_01",
     "createdById": "usr_admin_01",
-    "createdAt": "2026-10-30T08:53:25.999Z"
+    "createdAt": "2026-10-30T08:53:25.999Z",
+    "attachments": []
   },
   {
     "id": "cmvvc1svk000110xhxuh4c98g",
@@ -396,7 +415,8 @@ export const TEST_LEADS = [
     "directorApprovalStatus": "NONE",
     "salesPersonId": "usr_sales_01",
     "createdById": "usr_admin_01",
-    "createdAt": "2026-10-30T18:55:53.456Z"
+    "createdAt": "2026-10-30T18:55:53.456Z",
+    "attachments": []
   },
   {
     "id": "cmvvo7eo40001mbfh4b59gokc",
@@ -425,7 +445,8 @@ export const TEST_LEADS = [
     "directorApprovalStatus": "NONE",
     "salesPersonId": "usr_sales_02",
     "createdById": "usr_admin_01",
-    "createdAt": "2026-10-31T00:36:10.372Z"
+    "createdAt": "2026-10-31T00:36:10.372Z",
+    "attachments": []
   },
   {
     "id": "lead_test_hoabinh_05",
@@ -454,7 +475,8 @@ export const TEST_LEADS = [
     "directorApprovalStatus": "PENDING",
     "salesPersonId": "usr_sales_01",
     "createdById": "usr_admin_01",
-    "createdAt": "2026-10-30T10:00:00.000Z"
+    "createdAt": "2026-10-30T10:00:00.000Z",
+    "attachments": []
   },
   {
     "id": "lead_test_whitepalace_06",
@@ -483,7 +505,8 @@ export const TEST_LEADS = [
     "directorApprovalStatus": "NONE",
     "salesPersonId": "usr_sales_02",
     "createdById": "usr_admin_01",
-    "createdAt": "2026-10-30T11:00:00.000Z"
+    "createdAt": "2026-10-30T11:00:00.000Z",
+    "attachments": []
   }
 ];
 

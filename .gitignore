@@ -5,7 +5,6 @@ build/
 coverage/
 database/generated/
 **/tsconfig.tsbuildinfo
-backend/public/uploads/
 
 .env
 .env.*

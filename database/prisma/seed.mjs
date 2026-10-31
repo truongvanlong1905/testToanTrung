@@ -41,6 +41,7 @@ async function main() {
         position: u.position,
         appointedDecisionCode: u.appointedDecisionCode || null,
         initials: u.initials,
+        avatar: u.avatar || null,
         achievements: u.achievements || null,
       },
       create: {
@@ -164,12 +165,13 @@ async function main() {
 
     // 10. Đồng bộ Hồ sơ Lead Test (Upsert theo mã `code` để không bao giờ bị thiếu hoặc trùng)
     for (const lead of TEST_LEADS) {
+      const { attachments, ...leadFields } = lead;
       const payload = {
-        ...lead,
-        nextFollowUpAt: lead.nextFollowUpAt ? new Date(lead.nextFollowUpAt) : null,
-        createdAt: lead.createdAt ? new Date(lead.createdAt) : new Date(),
+        ...leadFields,
+        nextFollowUpAt: leadFields.nextFollowUpAt ? new Date(leadFields.nextFollowUpAt) : null,
+        createdAt: leadFields.createdAt ? new Date(leadFields.createdAt) : new Date(),
       };
-      await prisma.lead.upsert({
+      const savedLead = await prisma.lead.upsert({
         where: { code: lead.code },
         update: {
           customerName: payload.customerName,
@@ -196,6 +198,24 @@ async function main() {
         },
         create: payload,
       });
+
+      if (Array.isArray(attachments)) {
+        for (const att of attachments) {
+          await prisma.leadAttachment.upsert({
+            where: { id: att.id },
+            update: {
+              fileName: att.fileName,
+              fileUrl: att.fileUrl,
+              fileSize: att.fileSize,
+              fileType: att.fileType,
+            },
+            create: {
+              ...att,
+              leadId: savedLead.id,
+            },
+          });
+        }
+      }
     }
 
     // 11. Đồng bộ Báo giá LED m² (Quotes)
