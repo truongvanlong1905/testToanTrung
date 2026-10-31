@@ -374,3 +374,4 @@ diua/
 3. **Kiểm tra tự động trước khi commit**:
    - Chạy `npm run check:arch` để xác nhận không vi phạm ranh giới module.
    - Chạy `npm run typecheck` và `npm test` để xác nhận an toàn kiểu dữ liệu và nghiệp vụ.
+
