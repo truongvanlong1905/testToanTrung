@@ -39,3 +39,4 @@ jobs:
 
       - name: Build Full-Stack Application (DB + API + Web)
         run: npm run build
+

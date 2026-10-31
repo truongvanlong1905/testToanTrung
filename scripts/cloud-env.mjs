@@ -25,7 +25,8 @@ export function getCloudEnv() {
     JWT_SECRET: jwtSecret,
     API_BASE_URL: process.env.API_BASE_URL || "http://127.0.0.1:3002",
     ALLOW_DEMO_SEED: process.env.ALLOW_DEMO_SEED || "true",
-     sqliteFilePath: sqliteFile,
+    SEED_DEMO_DATA: process.env.SEED_DEMO_DATA || "true",
+    sqliteFilePath: sqliteFile,
   };
 }
 

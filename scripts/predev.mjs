@@ -136,3 +136,4 @@ cleanStaleNextDevLocks();
 
 execSync("npm run db:generate", { cwd: rootDir, stdio: "inherit", env });
 execSync("npm run db:push", { cwd: rootDir, stdio: "inherit", env });
+execSync("npm run db:seed --workspace @toantrung/database", { cwd: rootDir, stdio: "inherit", env });

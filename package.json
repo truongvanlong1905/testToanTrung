@@ -19,7 +19,8 @@
     "build:web": "npm run build --workspace @toantrung/web",
     "build:api": "npm run build --workspace @toantrung/api",
     "db:generate": "npm run db:generate --workspace @toantrung/database",
-    "db:push": "npm run db:push --workspace @toantrung/database"
+    "db:push": "npm run db:push --workspace @toantrung/database",
+    "db:save-test": "node database/scripts/export-test-data.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
