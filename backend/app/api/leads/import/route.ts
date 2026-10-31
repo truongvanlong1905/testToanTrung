@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, canAccessAllLeads, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
-import { computeLeadScore } from "@/lib/lead-scoring";
+import { computeLeadScore, extractMaxCodeSuffix } from "@/lib/lead-scoring";
 
 const ImportItemSchema = z.object({
   customerName: z.string().trim().min(2),
@@ -51,9 +51,9 @@ export async function POST(req: NextRequest) {
 
     const { items, autoAssignRoundRobin } = parsed.data;
 
-    // 1. Tải danh sách SĐT đang có để chống trùng tự động
+    // 1. Tải danh sách SĐT và Mã đang có để chống trùng tự động
     const existingLeads = await prisma.lead.findMany({
-      select: { phone: true },
+      select: { phone: true, code: true },
     });
     const existingPhoneSet = new Set(
       existingLeads.map((l) => cleanDigits(l.phone)).filter((d) => d.length >= 8)
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
 
     const now = new Date();
     const ym = `${String(now.getFullYear()).slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}`;
-    let runningCount = await prisma.lead.count();
+    let runningCount = extractMaxCodeSuffix(existingLeads, existingLeads.length);
     let rrIndex = 0;
 
     let importedCount = 0;
@@ -146,6 +146,17 @@ export async function POST(req: NextRequest) {
         },
       });
 
+      if (assignedSalesId) {
+        await prisma.leadAssignment.create({
+          data: {
+            leadId: created.id,
+            toSalesId: assignedSalesId,
+            reason: `Phân công tự động Round-Robin khi import nguồn ${item.source || "Website"}`,
+            assignedById: user.userId,
+          },
+        });
+      }
+
       assignmentSummary[assignedSalesName] = (assignmentSummary[assignedSalesName] || 0) + 1;
       importedCount += 1;
     }
@@ -182,4 +193,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

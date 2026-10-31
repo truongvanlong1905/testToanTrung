@@ -96,6 +96,127 @@ const DEPT_DISPLAY: Record<string, string> = {
   ADS: "Bộ Phận Quảng Cáo",
 };
 
+interface ComposeNotificationModalProps {
+  open: boolean;
+  onClose: () => void;
+  isBoardOrAdmin: boolean;
+  onSent: (message: string) => void;
+}
+
+const ComposeNotificationModal = React.memo(function ComposeNotificationModal({
+  open,
+  onClose,
+  isBoardOrAdmin,
+  onSent,
+}: ComposeNotificationModalProps) {
+  const [newTitle, setNewTitle] = useState("");
+  const [newContent, setNewContent] = useState("");
+  const [isSending, setIsSending] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setNewTitle("");
+      setNewContent("");
+      setIsSending(false);
+    }
+  }, [open]);
+
+  const handleSendNotification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim() || !newContent.trim()) return;
+    setIsSending(true);
+    try {
+      const res = await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newTitle.trim(),
+          content: newContent.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        onClose();
+        onSent(json.message || "Đã phát thông báo thành công!");
+      }
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      preventClose={isSending}
+      size="lg"
+      icon={<Send className="w-4 h-4" />}
+      title={
+        isBoardOrAdmin
+          ? "Phát Thông báo Toàn Hệ thống Toàn Trung"
+          : "Gửi Thông báo & Báo cáo lên Ban Giám Đốc"
+      }
+      description={
+        isBoardOrAdmin
+          ? "Thông báo này sẽ xuất hiện tức thì tại Trung tâm Thông báo và chuông báo của toàn bộ nhân sự các phòng ban."
+          : "Gửi đề xuất, báo cáo công việc hoặc kiến nghị trực tiếp lên Ban Giám Đốc và Quản trị viên."
+      }
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            size="md"
+            disabled={isSending}
+            onClick={onClose}
+          >
+            Hủy
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            isLoading={isSending}
+            leftIcon={<Send className="w-3.5 h-3.5" />}
+            onClick={handleSendNotification}
+          >
+            Gửi thông báo ngay
+          </Button>
+        </div>
+      }
+    >
+      <form onSubmit={handleSendNotification} className="space-y-4">
+        <div>
+          <label htmlFor="notif-title" className="crm-label text-xs">
+            Tiêu đề thông báo *
+          </label>
+          <input
+            id="notif-title"
+            type="text"
+            required
+            placeholder="VD: Thông báo áp dụng bảng giá Module LED P2.0 Indoor Quý IV..."
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            className="crm-input"
+          />
+        </div>
+        <div>
+          <label htmlFor="notif-content" className="crm-label text-xs">
+            Nội dung chi tiết *
+          </label>
+          <textarea
+            id="notif-content"
+            rows={5}
+            required
+            placeholder="Nhập đầy đủ nội dung chỉ đạo, quy định hoặc báo cáo tiến độ..."
+            value={newContent}
+            onChange={(e) => setNewContent(e.target.value)}
+            className="crm-textarea text-xs"
+          />
+        </div>
+      </form>
+    </Modal>
+  );
+});
+
 export function NotificationsView({
   leads,
   userRole,
@@ -111,11 +232,8 @@ export function NotificationsView({
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
   const [isMarkingAll, setIsMarkingAll] = useState(false);
 
-  // Create Notification / Report Modal
+  // Create Notification / Report Modal (state isolated inside ComposeNotificationModal)
   const [isComposeOpen, setIsComposeOpen] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newContent, setNewContent] = useState("");
-  const [isSending, setIsSending] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const fetchNotificationsData = useCallback(async () => {
@@ -324,32 +442,14 @@ export function NotificationsView({
     }
   };
 
-  const handleSendNotification = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim() || !newContent.trim()) return;
-    setIsSending(true);
-    try {
-      const res = await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: newTitle.trim(),
-          content: newContent.trim(),
-        }),
-      });
-      const json = await res.json();
-      if (res.ok && json.success) {
-        setNewTitle("");
-        setNewContent("");
-        setIsComposeOpen(false);
-        setFeedback(json.message || "Đã phát thông báo thành công!");
-        window.setTimeout(() => setFeedback(null), 4000);
-        await fetchNotificationsData();
-      }
-    } finally {
-      setIsSending(false);
-    }
-  };
+  const handleNotificationSent = useCallback(
+    async (msg: string) => {
+      setFeedback(msg);
+      window.setTimeout(() => setFeedback(null), 4000);
+      await fetchNotificationsData();
+    },
+    [fetchNotificationsData]
+  );
 
   const renderCategoryBadge = (cat: NotificationCategory) => {
     switch (cat) {
@@ -660,75 +760,13 @@ export function NotificationsView({
       </div>
 
       {/* Modal: Gửi thông báo / báo cáo mới */}
-      <Modal
+      <ComposeNotificationModal
         open={isComposeOpen}
         onClose={() => setIsComposeOpen(false)}
-        preventClose={isSending}
-        size="lg"
-        icon={<Send className="w-4 h-4" />}
-        title={
-          isBoardOrAdmin
-            ? "Phát Thông báo Toàn Hệ thống Toàn Trung"
-            : "Gửi Thông báo & Báo cáo lên Ban Giám Đốc"
-        }
-        description={
-          isBoardOrAdmin
-            ? "Thông báo này sẽ xuất hiện tức thì tại Trung tâm Thông báo và chuông báo của toàn bộ nhân sự các phòng ban."
-            : "Gửi đề xuất, báo cáo công việc hoặc kiến nghị trực tiếp lên Ban Giám Đốc và Quản trị viên."
-        }
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              size="md"
-              disabled={isSending}
-              onClick={() => setIsComposeOpen(false)}
-            >
-              Hủy
-            </Button>
-            <Button
-              variant="primary"
-              size="md"
-              isLoading={isSending}
-              leftIcon={<Send className="w-3.5 h-3.5" />}
-              onClick={handleSendNotification}
-            >
-              Gửi thông báo ngay
-            </Button>
-          </div>
-        }
-      >
-        <form onSubmit={handleSendNotification} className="space-y-4">
-          <div>
-            <label htmlFor="notif-title" className="crm-label text-xs">
-              Tiêu đề thông báo *
-            </label>
-            <input
-              id="notif-title"
-              type="text"
-              required
-              placeholder="VD: Thông báo áp dụng bảng giá Module LED P2.0 Indoor Quý IV..."
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              className="crm-input"
-            />
-          </div>
-          <div>
-            <label htmlFor="notif-content" className="crm-label text-xs">
-              Nội dung chi tiết *
-            </label>
-            <textarea
-              id="notif-content"
-              rows={5}
-              required
-              placeholder="Nhập đầy đủ nội dung chỉ đạo, quy định hoặc báo cáo tiến độ..."
-              value={newContent}
-              onChange={(e) => setNewContent(e.target.value)}
-              className="crm-textarea text-xs"
-            />
-          </div>
-        </form>
-      </Modal>
+        isBoardOrAdmin={isBoardOrAdmin}
+        onSent={handleNotificationSent}
+      />
     </div>
   );
 }
+

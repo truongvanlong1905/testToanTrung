@@ -148,7 +148,7 @@ function renderSlaPill(lead: Lead) {
   );
 }
 
-export function LeadTable({
+export const LeadTable = React.memo(function LeadTable({
   leads,
   onSelectLead,
   onCreateLead,
@@ -344,8 +344,8 @@ export function LeadTable({
   return (
     <div className="space-y-3">
       {/* Enterprise Triage Bar + Duplicate Check + View Mode Toggle */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-2.5 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-0.5 sm:pb-0 sm:flex-wrap -mx-1 px-1">
           <button
             type="button"
             onClick={() => {
@@ -353,7 +353,7 @@ export function LeadTable({
               setCurrentPage(1);
             }}
             className={cn(
-              "h-8 px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer",
+              "h-8 px-2.5 sm:px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap",
               triageMode === "all"
                 ? "bg-blue-600 text-white border-blue-600 shadow-xs"
                 : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
@@ -377,7 +377,7 @@ export function LeadTable({
               setCurrentPage(1);
             }}
             className={cn(
-              "h-8 px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer",
+              "h-8 px-2.5 sm:px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap",
               triageMode === "hot"
                 ? "bg-rose-600 text-white border-rose-600 shadow-xs"
                 : "bg-white text-slate-700 border-slate-200 hover:bg-rose-50/50"
@@ -404,7 +404,7 @@ export function LeadTable({
               setCurrentPage(1);
             }}
             className={cn(
-              "h-8 px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer",
+              "h-8 px-2.5 sm:px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap",
               triageMode === "sla"
                 ? "bg-amber-600 text-white border-amber-600 shadow-xs"
                 : "bg-white text-slate-700 border-slate-200 hover:bg-amber-50/50"
@@ -431,7 +431,7 @@ export function LeadTable({
               setCurrentPage(1);
             }}
             className={cn(
-              "h-8 px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer",
+              "h-8 px-2.5 sm:px-3 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap",
               triageMode === "director"
                 ? "bg-blue-700 text-white border-blue-700 shadow-xs"
                 : "bg-white text-slate-700 border-slate-200 hover:bg-blue-50/50"
@@ -455,7 +455,7 @@ export function LeadTable({
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center justify-between sm:justify-end gap-3">
           <div className="flex items-center gap-2 text-xs">
             {duplicateIds.size > 0 ? (
               <StatusBadge tone="error" dot={false}>
@@ -463,7 +463,7 @@ export function LeadTable({
                 Trùng {duplicateIds.size} SĐT/Đơn vị
               </StatusBadge>
             ) : (
-              <span className="hidden xl:inline-flex items-center gap-1.5 text-slate-500">
+              <span className="inline-flex items-center gap-1.5 text-slate-500">
                 <Check className="w-3.5 h-3.5 text-emerald-600" />
                 Không trùng SĐT
               </span>
@@ -499,7 +499,109 @@ export function LeadTable({
         </div>
       ) : viewMode === "table" ? (
         <div className="crm-card overflow-hidden animate-fade-in">
-          <div className="overflow-x-auto max-h-[640px]">
+          {/* Mobile Card List (< 768px) — zero horizontal overflow on phones */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {currentLeads.map((lead) => {
+              const isDup = duplicateIds.has(lead.id);
+              const ledArea =
+                lead.ledWidth && lead.ledHeight
+                  ? Number((lead.ledWidth * lead.ledHeight).toFixed(1))
+                  : null;
+
+              return (
+                <div
+                  key={lead.id}
+                  onClick={() => onSelectLead(lead)}
+                  className={cn(
+                    "p-3.5 space-y-2.5 cursor-pointer hover:bg-slate-50/70 transition-colors",
+                    isDup && "bg-rose-50/35"
+                  )}
+                >
+                  {/* Top row: Code + Score + Status */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-mono text-xs font-medium text-slate-500">
+                        {lead.code}
+                      </span>
+                      {isDup && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-medium">
+                          Trùng
+                        </span>
+                      )}
+                      {renderScoreBadge(lead)}
+                    </div>
+                    <StatusBadge tone={getLeadStatusTone(lead.status)} size="sm">
+                      {lead.status}
+                    </StatusBadge>
+                  </div>
+
+                  {/* Customer & Company */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[13.5px] font-semibold text-slate-900 truncate">
+                        {lead.customerName}
+                      </div>
+                      <div className="text-xs text-slate-500 truncate mt-0.5">
+                        {lead.companyName}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="kpi-number text-[13px] font-semibold text-slate-900">
+                        {lead.estimatedValue || "—"}
+                      </div>
+                      <div className="text-[10.5px] text-slate-400 font-mono mt-0.5">
+                        {lead.createdAt}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Product & LED Area */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-700 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
+                    <span className="font-medium truncate max-w-[220px]">{lead.product}</span>
+                    {ledArea && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200/70 text-[10.5px] font-medium kpi-number">
+                        <Maximize2 className="w-2.5 h-2.5" />
+                        {ledArea} m²
+                      </span>
+                    )}
+                    {lead.location && (
+                      <span className="text-slate-500 inline-flex items-center gap-0.5 ml-auto">
+                        <MapPin className="w-3 h-3 shrink-0" />
+                        <span className="truncate max-w-[100px]">{lead.location}</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Bottom bar: Phone Call + Sales + Quick Open */}
+                  <div className="flex items-center justify-between gap-2 pt-0.5 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <a
+                        href={`tel:${lead.phone}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-600 border border-slate-200 font-mono text-[11.5px] font-medium shrink-0"
+                      >
+                        <Phone className="w-3 h-3 text-blue-600" />
+                        {lead.phone}
+                      </a>
+                      {renderSlaPill(lead)}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-semibold flex items-center justify-center">
+                        {lead.salesPerson.initials}
+                      </span>
+                      <span className="text-xs text-slate-600 font-medium truncate max-w-[90px]">
+                        {lead.salesPerson.name}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop Table (>= 768px) */}
+          <div className="hidden md:block overflow-x-auto max-h-[640px]">
             <table className="crm-table">
               <thead>
                 <tr>
@@ -959,4 +1061,4 @@ export function LeadTable({
       )}
     </div>
   );
-}
+});

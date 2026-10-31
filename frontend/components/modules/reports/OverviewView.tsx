@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Users2,
   FileSpreadsheet,
@@ -16,11 +16,11 @@ import {
   Layers,
   Clock,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { Lead, LeadStatus } from "@/types/lead";
 import { CampaignItem } from "@/types/ads";
 import { OverviewStats, ReportItem } from "@/types/report";
-import { sharedGetJson } from "@/lib/shared-fetch";
 import { cn } from "@/lib/utils";
 import { PageHeader, SectionHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
@@ -60,12 +60,45 @@ function formatShortDate(d: Date): string {
   return `${dd}/${mm}`;
 }
 
+function formatExactVnd(amount?: number): string | null {
+  if (!amount || !Number.isFinite(amount) || amount <= 0) return null;
+  return `${Math.round(amount).toLocaleString("vi-VN")} đ`;
+}
+
+type AnalyticsLead = Lead & { createdAtISO?: string };
+
 interface LeadAnalytics {
   total: number;
   statusCounts: Record<string, number>;
   bySource: Array<{ source: string; count: number }>;
-  bySales: Array<{ name: string; initials: string; count: number; won: number }>;
+  bySales: Array<{
+    name: string;
+    initials: string;
+    count: number;
+    won: number;
+    pipelineVnd?: number;
+  }>;
   byDay: Array<{ date: string; count: number }>;
+  financials?: {
+    totalPipelineVnd: number;
+    quotingValueVnd: number;
+    wonRevenueVnd: number;
+  };
+  recentLeads?: AnalyticsLead[];
+  actionQueue?: {
+    contactCount: number;
+    quotingFollowUpCount: number;
+    items: Array<{
+      lead: AnalyticsLead;
+      reason: string;
+      daysWaiting: number;
+    }>;
+  };
+  webTotals?: {
+    trackingEventsCount: number;
+    reportsCount: number;
+    campaignsCount: number;
+  };
 }
 
 interface TimePoint {
@@ -170,79 +203,82 @@ export function OverviewView({
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Real Campaigns & Reports for Dashboard Analytics & Activity feed
+  // Real Campaigns & Reports read live from the web database (no cached / synthetic data)
   const [campaigns, setCampaigns] = useState<CampaignItem[]>([]);
   const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(true);
   const [recentReports, setRecentReports] = useState<ReportItem[]>([]);
   const [isLoadingReports, setIsLoadingReports] = useState(true);
 
-  useEffect(() => {
-    let active = true;
-    fetch("/api/campaigns")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json) => {
-        if (active && json?.success && Array.isArray(json.data?.campaigns)) {
-          setCampaigns(json.data.campaigns);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (active) setIsLoadingCampaigns(false);
-      });
-
-    sharedGetJson("/api/reports")
-      .then(({ ok, payload }) => {
-        if (active && ok && payload?.success && Array.isArray(payload.data?.reports)) {
-          setRecentReports(payload.data.reports);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (active) setIsLoadingReports(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // Aggregates computed by the database for the selected period (covers every Lead,
-  // not just the first page returned by the list API).
+  // Real Database Aggregates for the selected period (independent of Lead tab filters)
   const [analytics, setAnalytics] = useState<LeadAnalytics | null>(null);
   const [analyticsFailed, setAnalyticsFailed] = useState(false);
 
-  const range = useMemo(() => getRangeParams(timeRange, customFrom, customTo), [
-    timeRange,
-    customFrom,
-    customTo,
-  ]);
+  const range = useMemo(
+    () => getRangeParams(timeRange, customFrom, customTo),
+    [timeRange, customFrom, customTo]
+  );
+
+  // Create a lightweight signature from `leads` so creating/editing/deleting a Lead on the web
+  // automatically refreshes Dashboard figures immediately.
+  const leadsMutationKey = useMemo(
+    () => leads.map((l) => `${l.id}:${l.status}:${l.estimatedValue}`).join("|"),
+    [leads]
+  );
+
+  const handleManualRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    setRefreshTick((t) => t + 1);
+  }, []);
 
   useEffect(() => {
     let active = true;
+
     const params = new URLSearchParams();
     if (range.from) params.set("from", range.from);
     if (range.to) params.set("to", range.to);
 
-    fetch(`/api/leads/analytics?${params.toString()}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json) => {
+    Promise.all([
+      fetch(`/api/leads/analytics?${params.toString()}`, { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null),
+      fetch("/api/campaigns", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null),
+      fetch("/api/reports", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null),
+    ])
+      .then(([analyticsJson, campaignsJson, reportsJson]) => {
         if (!active) return;
-        if (json?.success && json.data) {
-          setAnalytics(json.data as LeadAnalytics);
+
+        if (analyticsJson?.success && analyticsJson.data) {
+          setAnalytics(analyticsJson.data as LeadAnalytics);
           setAnalyticsFailed(false);
         } else {
           setAnalyticsFailed(true);
         }
+
+        if (campaignsJson?.success && Array.isArray(campaignsJson.data?.campaigns)) {
+          setCampaigns(campaignsJson.data.campaigns);
+        }
+        setIsLoadingCampaigns(false);
+
+        if (reportsJson?.success && Array.isArray(reportsJson.data?.reports)) {
+          setRecentReports(reportsJson.data.reports);
+        }
+        setIsLoadingReports(false);
       })
-      .catch(() => {
-        if (active) setAnalyticsFailed(true);
+      .finally(() => {
+        if (active) setIsRefreshing(false);
       });
 
     return () => {
       active = false;
     };
-  }, [range.from, range.to]);
+  }, [range.from, range.to, leadsMutationKey, refreshTick]);
 
   const filteredLeads = useMemo(() => {
     if (timeRange === "all") return leads;
@@ -271,7 +307,7 @@ export function OverviewView({
     });
   }, [leads, timeRange, customFrom, customTo]);
 
-  // Prefer DB aggregates; fall back to the loaded page of Leads only if the API is unreachable.
+  // Always prefer direct database aggregates (unfiltered by Lead Management tab).
   const dbStatus = analytics?.statusCounts;
   const useDb = Boolean(analytics);
   const countOf = (status: string) => dbStatus?.[status] ?? 0;
@@ -312,11 +348,14 @@ export function OverviewView({
   const hasRealLeadData = (useDb || hasLoadedLeads) && totalLeads > 0;
   const winRate = totalLeads > 0 ? Math.round((wonLeads / totalLeads) * 100) : 0;
 
+  const totalPipelineLabel = formatExactVnd(analytics?.financials?.totalPipelineVnd);
+  const quotingValueLabel = formatExactVnd(analytics?.financials?.quotingValueVnd);
+  const wonRevenueLabel = formatExactVnd(analytics?.financials?.wonRevenueVnd);
+
   // 1. Lead theo thời gian
   const leadsByTime = useMemo<TimePoint[]>(() => {
     if (analytics) return buildTimeSeries(analytics.byDay, range.from, range.to);
 
-    // Fallback (API unavailable): bucket the loaded Leads by day
     const map = new Map<string, { label: string; count: number; ts: number }>();
     filteredLeads.forEach((lead) => {
       const d = parseLeadDate(lead.createdAt);
@@ -369,13 +408,13 @@ export function OverviewView({
     [newLeads, draftingLeads, sentQuoteLeads, wonLeads, lostLeads]
   );
 
-  // 4. Sales performance (real lead & won counts)
+  // 4. Sales performance (real lead, won & VND pipeline counts)
   const salesPerformance = useMemo(() => {
     if (analytics) return analytics.bySales;
 
     const salesMap = new Map<
       string,
-      { name: string; initials: string; count: number; won: number }
+      { name: string; initials: string; count: number; won: number; pipelineVnd?: number }
     >();
 
     filteredLeads.forEach((l) => {
@@ -399,14 +438,14 @@ export function OverviewView({
           initials: s.initials,
           count: s.count,
           won: 0,
+          pipelineVnd: undefined,
         }));
     }
 
     return Array.from(salesMap.values()).sort((a, b) => b.count - a.count);
   }, [analytics, filteredLeads, stats, useServerAllStats]);
 
-  // 5. Activity Area — honest feed: we only know each Lead's *current* status (no change log
-  //    is exposed here), so lead rows describe the record rather than claiming a status event.
+  // 5. Activity Feed — built directly from real DB `recentLeads` & real `recentReports` sorted by timestamp
   const activityFeed = useMemo(() => {
     const items: Array<{
       id: string;
@@ -414,36 +453,66 @@ export function OverviewView({
       title: string;
       subtitle: string;
       meta: string;
+      ts: number;
       leadRef?: Lead;
     }> = [];
 
-    filteredLeads.slice(0, 4).forEach((l) => {
+    const sourceLeads = analytics?.recentLeads ?? filteredLeads.slice(0, 6);
+
+    sourceLeads.forEach((l) => {
+      const isoTs = (l as AnalyticsLead).createdAtISO
+        ? new Date((l as AnalyticsLead).createdAtISO!).getTime()
+        : parseLeadDate(l.createdAt)?.getTime() || 0;
       items.push({
         id: `lead-${l.id}`,
         category: "lead",
-        title: `${l.customerName} · ${l.companyName}`,
+        title: `${l.customerName}${l.companyName ? ` · ${l.companyName}` : ""}`,
         subtitle: `${l.code} · ${l.product} · Phụ trách: ${l.salesPerson.name}`,
         meta: l.createdAt,
+        ts: isoTs,
         leadRef: l,
       });
     });
 
-    recentReports.slice(0, 4).forEach((r) => {
+    recentReports.slice(0, 5).forEach((r) => {
+      const rDate = new Date(r.createdAt);
+      const rTs = Number.isNaN(rDate.getTime()) ? 0 : rDate.getTime();
+      if (range.from) {
+        const fromTs = new Date(`${range.from}T00:00:00`).getTime();
+        if (rTs < fromTs) return;
+      }
+      if (range.to) {
+        const toTs = new Date(`${range.to}T23:59:59`).getTime();
+        if (rTs > toTs) return;
+      }
       const isDesign = r.department === "DESIGN";
       items.push({
         id: `rep-${r.id}`,
         category: isDesign ? "design" : "report",
         title: r.title,
         subtitle: `${r.createdBy.name} · Phòng ${r.department}`,
-        meta: new Date(r.createdAt).toLocaleDateString("vi-VN"),
+        meta: rDate.toLocaleDateString("vi-VN"),
+        ts: rTs,
       });
     });
 
-    return items.slice(0, 7);
-  }, [filteredLeads, recentReports]);
+    return items.sort((a, b) => b.ts - a.ts).slice(0, 7);
+  }, [analytics, filteredLeads, recentReports, range.from, range.to]);
 
-  // 6. Action queue — real leads waiting on the team, oldest first (longest waiting at top)
+  // 6. Action queue — real leads waiting on the team directly from database (oldest waiting first)
   const actionQueue = useMemo(() => {
+    if (analytics?.actionQueue) {
+      return {
+        contactCount: analytics.actionQueue.contactCount,
+        followUpCount: analytics.actionQueue.quotingFollowUpCount,
+        items: analytics.actionQueue.items.map((item) => ({
+          lead: item.lead,
+          reason: item.reason,
+          days: item.daysWaiting,
+        })),
+      };
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const toItem = (l: Lead, reason: string) => {
@@ -455,14 +524,16 @@ export function OverviewView({
       .filter((l) => l.status === "Vừa nhận thông tin")
       .map((l) => toItem(l, "Chờ liên hệ"));
     const followUp = filteredLeads
-      .filter((l) => l.status === "Đã gửi báo giá")
-      .map((l) => toItem(l, "Chờ phản hồi báo giá"));
+      .filter((l) => l.status === "Đang soạn báo giá" || l.status === "Đã gửi báo giá")
+      .map((l) =>
+        toItem(l, l.status === "Đang soạn báo giá" ? "Đang soạn báo giá" : "Chờ phản hồi báo giá")
+      );
     return {
       contactCount: contact.length,
       followUpCount: followUp.length,
       items: [...contact, ...followUp].sort((a, b) => a.ts - b.ts).slice(0, 6),
     };
-  }, [filteredLeads]);
+  }, [analytics, filteredLeads]);
 
   const maxTimeCount = Math.max(1, ...leadsByTime.map((d) => d.count));
 
@@ -480,7 +551,7 @@ export function OverviewView({
       {/* Top Area */}
       <PageHeader
         title="Dashboard"
-        description="Tổng quan hoạt động Marketing & Kinh doanh"
+        description="Số liệu đồng bộ trực tiếp 100% từ dữ liệu thực tế hiện có trên Web"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <SegmentedControl
@@ -499,16 +570,47 @@ export function OverviewView({
             <Button
               variant="secondary"
               size="md"
+              onClick={handleManualRefresh}
+              leftIcon={
+                <RefreshCw className={cn("w-3.5 h-3.5", isRefreshing && "animate-spin")} />
+              }
+              title="Đồng bộ lại số liệu thực tế mới nhất từ cơ sở dữ liệu"
+            >
+              Làm mới
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="md"
               isLoading={isExportingExcel}
-              disabled={filteredLeads.length === 0}
+              disabled={!hasRealLeadData}
               leftIcon={<FileSpreadsheet className="w-4 h-4 text-emerald-600" />}
               onClick={async () => {
                 try {
                   setIsExportingExcel(true);
-                  // Loaded on demand: the Excel engine is large and only needed when exporting
+                  // Fetch unfiltered real web leads directly from API so Lead tab filters never truncate export
+                  let exportRows: Lead[] = filteredLeads;
+                  try {
+                    const res = await fetch("/api/leads?pageSize=100", { cache: "no-store" });
+                    const json = await res.json();
+                    if (res.ok && json?.success && Array.isArray(json.data?.leads)) {
+                      const allWebLeads: Lead[] = json.data.leads;
+                      exportRows = allWebLeads.filter((lead) => {
+                        if (!range.from && !range.to) return true;
+                        const parsed = parseLeadDate(lead.createdAt);
+                        if (!parsed) return true;
+                        if (range.from && parsed < new Date(`${range.from}T00:00:00`)) return false;
+                        if (range.to && parsed > new Date(`${range.to}T23:59:59`)) return false;
+                        return true;
+                      });
+                    }
+                  } catch {
+                    // fallback to filteredLeads if offline
+                  }
+
                   const { exportLeadsWorkbook } = await import("@/lib/excel-export");
                   await exportLeadsWorkbook({
-                    leads: filteredLeads,
+                    leads: exportRows,
                     stats: useServerAllStats ? stats : undefined,
                     filterLabel: `Dashboard (${getRangeLabel()})`,
                     exportedBy: "Ban Điều Hành Toàn Trung",
@@ -524,7 +626,7 @@ export function OverviewView({
             <Button
               variant="primary"
               size="md"
-              onClick={() => onNavigateToLeads()}
+              onClick={() => onNavigateToLeads("all")}
               rightIcon={<ArrowRight className="w-4 h-4" />}
             >
               Quản lý Lead
@@ -576,7 +678,7 @@ export function OverviewView({
         </div>
       )}
 
-      {/* KPI Cards — each drills down into Lead Management with the matching stage filter */}
+      {/* KPI Cards — 100% real DB counts & VND pipeline figures */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard
           label="Tổng Lead"
@@ -586,7 +688,9 @@ export function OverviewView({
           iconTone="blue"
           note={
             hasRealLeadData
-              ? `Kỳ lọc: ${getRangeLabel()}`
+              ? totalPipelineLabel
+                ? `Tổng dự toán thực tế: ${totalPipelineLabel}`
+                : `Kỳ lọc: ${getRangeLabel()}`
               : "Chưa ghi nhận hồ sơ khách hàng tiềm năng"
           }
           onClick={hasRealLeadData ? () => onNavigateToLeads("all") : undefined}
@@ -618,11 +722,20 @@ export function OverviewView({
           badgeTone="warning"
           note={
             hasRealLeadData
-              ? `${draftingLeads} đang soạn · ${sentQuoteLeads} đã gửi`
+              ? quotingValueLabel
+                ? `${draftingLeads} soạn · ${sentQuoteLeads} đã gửi (${quotingValueLabel})`
+                : `${draftingLeads} đang soạn · ${sentQuoteLeads} đã gửi`
               : "Chưa có hồ sơ đang báo giá"
           }
-          onClick={hasRealLeadData ? () => onNavigateToLeads("Đã gửi báo giá") : undefined}
-          actionHint="Xem đã gửi"
+          onClick={
+            hasRealLeadData
+              ? () =>
+                  onNavigateToLeads(
+                    sentQuoteLeads > 0 ? "Đã gửi báo giá" : "Đang soạn báo giá"
+                  )
+              : undefined
+          }
+          actionHint="Xem báo giá"
         />
         <StatCard
           label="Chốt thành công"
@@ -635,7 +748,9 @@ export function OverviewView({
           badgeTone="success"
           note={
             hasRealLeadData
-              ? `${lostLeads} hồ sơ thất bại / tạm ngưng`
+              ? wonRevenueLabel
+                ? `Doanh số chốt: ${wonRevenueLabel}`
+                : `${lostLeads} hồ sơ thất bại / tạm ngưng`
               : "Chưa có dữ liệu chuyển đổi hợp đồng"
           }
           onClick={hasRealLeadData ? () => onNavigateToLeads("Chốt thành công") : undefined}
@@ -651,16 +766,15 @@ export function OverviewView({
             title="Lead theo thời gian"
             description={
               leadsByTime.length > 31 || leadsByTime.some((p) => p.label.length > 5)
-                ? "Số Lead tiếp nhận theo tháng (đọc trực tiếp từ cơ sở dữ liệu)"
-                : "Số Lead tiếp nhận theo ngày (đọc trực tiếp từ cơ sở dữ liệu)"
+                ? "Số Lead thực tế tiếp nhận theo tháng trên Web"
+                : "Số Lead thực tế tiếp nhận theo ngày trên Web"
             }
             count={hasRealLeadData ? `${totalLeads.toLocaleString("vi-VN")} Lead` : undefined}
           />
 
           {analyticsFailed && !analytics && (
             <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              Không tải được số liệu tổng hợp từ máy chủ. Biểu đồ đang chỉ tính trên các Lead đã tải
-              (tối đa 50 Lead gần nhất).
+              Không tải được số liệu tổng hợp từ máy chủ. Biểu đồ đang chỉ tính trên các Lead đã tải.
             </p>
           )}
 
@@ -668,7 +782,6 @@ export function OverviewView({
             <div className="mt-6 pt-2">
               <div className="h-44 flex items-end gap-1 sm:gap-1.5 px-1 border-b border-slate-100 pb-2">
                 {leadsByTime.map((point) => {
-                  // Exact proportion: a day with 0 Lead renders no bar (no artificial minimum height)
                   const heightPct =
                     point.count === 0 ? 0 : Math.max(3, Math.round((point.count / maxTimeCount) * 100));
                   return (
@@ -714,7 +827,7 @@ export function OverviewView({
                 compact
                 icon={TrendingUp}
                 title="Chưa có dữ liệu Lead theo thời gian"
-                description="Biểu đồ xu hướng sẽ tự động hiển thị ngay khi hệ thống ghi nhận khách hàng tiềm năng thật."
+                description="Biểu đồ xu hướng sẽ tự động hiển thị ngay khi bạn thêm khách hàng tiềm năng trên Web."
               />
             </div>
           )}
@@ -724,7 +837,7 @@ export function OverviewView({
         <div className="lg:col-span-5 crm-card p-5 flex flex-col justify-between">
           <SectionHeader
             title="Lead theo trạng thái"
-            description="Phân bổ tiến độ 5 giai đoạn xử lý hồ sơ dự án"
+            description="Phân bổ thực tế 5 giai đoạn xử lý hồ sơ dự án"
           />
 
           {hasRealLeadData ? (
@@ -765,7 +878,7 @@ export function OverviewView({
                 compact
                 icon={Layers}
                 title="Chưa có dữ liệu trạng thái"
-                description="Tỷ trọng 5 bước tiến độ sẽ hiển thị khi có hồ sơ Lead trong cơ sở dữ liệu."
+                description="Tỷ trọng 5 bước tiến độ sẽ hiển thị khi có hồ sơ Lead thật trên Web."
               />
             </div>
           )}
@@ -778,7 +891,7 @@ export function OverviewView({
         <div className="crm-card p-5">
           <SectionHeader
             title="Lead theo nguồn"
-            description="Tỷ trọng các kênh mang về khách hàng"
+            description="Tỷ trọng thực tế các kênh tiếp nhận khách hàng"
             count={leadsBySource.length > 0 ? `${leadsBySource.length} kênh` : undefined}
           />
 
@@ -814,11 +927,12 @@ export function OverviewView({
           )}
         </div>
 
-        {/* Campaign Performance (Real /api/campaigns) */}
+        {/* Campaign Performance (100% Real /api/campaigns created on Web) */}
         <div className="crm-card p-5">
           <SectionHeader
-            title="Campaign Performance"
-            description="Hiệu suất ngân sách & CTR các chiến dịch thực tế"
+            title="Chiến dịch Marketing"
+            description="Chiến dịch thực tế đang vận hành trên Web"
+            count={campaigns.length > 0 ? `${campaigns.length} chiến dịch` : undefined}
             action={
               onNavigateToTab ? (
                 <button
@@ -826,7 +940,7 @@ export function OverviewView({
                   onClick={() => onNavigateToTab("ads")}
                   className="text-xs font-medium text-blue-600 hover:text-blue-700 cursor-pointer"
                 >
-                  Chi tiết
+                  Quản lý
                 </button>
               ) : undefined
             }
@@ -863,8 +977,8 @@ export function OverviewView({
                     </div>
                     <div className="flex items-center justify-between text-[11.5px] text-slate-500 kpi-number">
                       <span>
-                        Chi: {(camp.spent / 1_000_000).toFixed(1)}M /{" "}
-                        {(camp.budget / 1_000_000).toFixed(1)}M
+                        Chi: {camp.spent.toLocaleString("vi-VN")} đ /{" "}
+                        {camp.budget.toLocaleString("vi-VN")} đ
                       </span>
                       <span>
                         {camp.platform} · <strong className="text-slate-800">{spendRatio}%</strong>
@@ -885,8 +999,19 @@ export function OverviewView({
               <EmptyState
                 compact
                 icon={Megaphone}
-                title="Chưa có dữ liệu chiến dịch"
-                description="Chưa có chiến dịch quảng cáo nào được ghi nhận trên hệ thống."
+                title="Chưa tạo chiến dịch quảng cáo trên Web"
+                description="Hệ thống không tạo số liệu giả. Khi bạn thêm chiến dịch tại mục Quảng cáo & Từ khóa, hiệu suất thật sẽ hiển thị tại đây."
+                action={
+                  onNavigateToTab ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => onNavigateToTab("ads")}
+                    >
+                      Mở Quảng cáo &amp; Từ khóa
+                    </Button>
+                  ) : undefined
+                }
               />
             </div>
           )}
@@ -895,60 +1020,64 @@ export function OverviewView({
         {/* Sales Performance */}
         <div className="crm-card p-5">
           <SectionHeader
-            title="Sales Performance"
-            description="Phân bổ khối lượng hồ sơ theo nhân sự Kinh doanh"
+            title="Hiệu suất Sales"
+            description="Phân bổ hồ sơ thực tế theo nhân sự Kinh doanh"
             count={salesPerformance.length > 0 ? `${salesPerformance.length} Sales` : undefined}
           />
 
           {salesPerformance.length > 0 ? (
             <div className="mt-4 space-y-2.5">
-              {salesPerformance.slice(0, 5).map((person) => (
-                <div
-                  key={person.name}
-                  className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-slate-200/70 bg-slate-50/40"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="w-7 h-7 rounded-full bg-slate-200/80 text-slate-700 text-[11px] font-semibold flex items-center justify-center shrink-0">
-                      {person.initials}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-medium text-slate-900 truncate">
-                        {person.name}
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        {person.won > 0 ? `Đã chốt ${person.won} dự án` : "Đang chăm sóc cơ hội"}
-                      </p>
+              {salesPerformance.slice(0, 5).map((person) => {
+                const personPipeline = formatExactVnd(person.pipelineVnd);
+                return (
+                  <div
+                    key={person.name}
+                    className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-slate-200/70 bg-slate-50/40"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-7 h-7 rounded-full bg-slate-200/80 text-slate-700 text-[11px] font-semibold flex items-center justify-center shrink-0">
+                        {person.initials}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-medium text-slate-900 truncate">
+                          {person.name}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {person.won > 0 ? `Đã chốt ${person.won} dự án` : "Đang chăm sóc cơ hội"}
+                          {personPipeline ? ` · ${personPipeline}` : ""}
+                        </p>
+                      </div>
                     </div>
-                  </div>
 
-                  <span className="text-xs font-semibold text-slate-800 kpi-number px-2 py-1 rounded-md bg-white border border-slate-200/80 shrink-0">
-                    {person.count} Lead
-                  </span>
-                </div>
-              ))}
+                    <span className="text-xs font-semibold text-slate-800 kpi-number px-2 py-1 rounded-md bg-white border border-slate-200/80 shrink-0">
+                      {person.count} Lead
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="mt-4">
               <EmptyState
                 compact
                 icon={Award}
-                title="Chưa có dữ liệu hiệu suất Sales"
-                description="Thống kê bàn giao và chốt hợp đồng sẽ hiển thị khi có Lead được phân công."
+                title="Chưa có dữ liệu phân công Sales"
+                description="Thống kê bàn giao và chốt hợp đồng sẽ hiển thị khi có Lead được phân công trên Web."
               />
             </div>
           )}
         </div>
       </div>
 
-      {/* Row 3: Activity feed (what happened) + Action queue (what to do next) */}
+      {/* Row 3: Real Web Activity Feed + Real Action Queue */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         <div className="lg:col-span-7 crm-card overflow-hidden flex flex-col">
           <CardHeader
-            title="Hoạt động gần đây"
-            description="Lead mới nhất và báo cáo vừa gửi từ các phòng ban"
+            title="Hoạt động thực tế gần đây"
+            description="Lead mới nhất và báo cáo thực tế vừa gửi trên hệ thống"
             actions={
-              <Button variant="ghost" size="sm" onClick={() => onNavigateToLeads()}>
-                Xem tất cả
+              <Button variant="ghost" size="sm" onClick={() => onNavigateToLeads("all")}>
+                Xem tất cả Lead
               </Button>
             }
           />
@@ -970,10 +1099,22 @@ export function OverviewView({
               {activityFeed.map((act) => {
                 const meta =
                   act.category === "lead"
-                    ? { label: "Lead", Icon: UserPlus2, cls: "bg-blue-50 text-blue-600 border-blue-200/70" }
+                    ? {
+                        label: "Lead",
+                        Icon: UserPlus2,
+                        cls: "bg-blue-50 text-blue-600 border-blue-200/70",
+                      }
                     : act.category === "design"
-                      ? { label: "Thiết kế", Icon: Layers, cls: "bg-slate-100 text-slate-600 border-slate-200" }
-                      : { label: "Báo cáo", Icon: ClipboardList, cls: "bg-emerald-50 text-emerald-600 border-emerald-200/70" };
+                      ? {
+                          label: "Thiết kế",
+                          Icon: Layers,
+                          cls: "bg-slate-100 text-slate-600 border-slate-200",
+                        }
+                      : {
+                          label: "Báo cáo",
+                          Icon: ClipboardList,
+                          cls: "bg-emerald-50 text-emerald-600 border-emerald-200/70",
+                        };
                 const Icon = meta.Icon;
 
                 return (
@@ -1028,10 +1169,10 @@ export function OverviewView({
             <EmptyState
               compact
               icon={ClipboardList}
-              title="Chưa có hoạt động nào gần đây"
-              description="Khi có Lead mới hoặc báo cáo từ các phòng ban, nhật ký sẽ tự động xuất hiện tại đây."
+              title="Chưa có hoạt động nào trên Web"
+              description="Khi bạn tạo Lead mới hoặc gửi báo cáo phòng ban, dữ liệu thực tế sẽ tự động xuất hiện tại đây."
               action={
-                <Button variant="primary" size="sm" onClick={() => onNavigateToLeads()}>
+                <Button variant="primary" size="sm" onClick={() => onNavigateToLeads("all")}>
                   Chuyển tới Quản lý Lead
                 </Button>
               }
@@ -1043,7 +1184,7 @@ export function OverviewView({
         <div className="lg:col-span-5 crm-card overflow-hidden flex flex-col">
           <CardHeader
             title="Cần xử lý"
-            description="Lead đang chờ đội ngũ phản hồi, chờ lâu nhất xếp trước"
+            description="Lead thực tế đang chờ liên hệ hoặc theo dõi báo giá"
             count={actionQueue.contactCount + actionQueue.followUpCount}
           />
 
@@ -1062,10 +1203,14 @@ export function OverviewView({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onNavigateToLeads("Đã gửi báo giá")}
+                  onClick={() =>
+                    onNavigateToLeads(
+                      sentQuoteLeads > 0 ? "Đã gửi báo giá" : "Đang soạn báo giá"
+                    )
+                  }
                   className="bg-white px-5 py-3 text-left hover:bg-slate-50 transition-colors cursor-pointer"
                 >
-                  <p className="text-overline">Chờ phản hồi báo giá</p>
+                  <p className="text-overline">Đang / Đã gửi báo giá</p>
                   <p className="mt-1 text-xl font-semibold text-slate-900 tabular-nums">
                     {actionQueue.followUpCount}
                   </p>
@@ -1082,6 +1227,11 @@ export function OverviewView({
                       <div className="min-w-0">
                         <p className="text-[13px] font-medium text-slate-900 truncate group-hover:text-blue-600 transition-colors">
                           {lead.customerName}
+                          {lead.estimatedValue && lead.estimatedValue !== "Đang khảo sát" ? (
+                            <span className="ml-1.5 text-[11.5px] font-semibold text-blue-600">
+                              · {lead.estimatedValue}
+                            </span>
+                          ) : null}
                         </p>
                         <p className="text-xs text-slate-500 truncate mt-0.5">
                           {reason} · {lead.salesPerson.name}
@@ -1114,8 +1264,8 @@ export function OverviewView({
               title={hasRealLeadData ? "Không có Lead tồn đọng" : "Chưa có dữ liệu Lead"}
               description={
                 hasRealLeadData
-                  ? "Không có hồ sơ nào đang chờ liên hệ hoặc chờ phản hồi báo giá trong kỳ đã chọn."
-                  : "Danh sách việc cần làm sẽ xuất hiện khi có Lead trong hệ thống."
+                  ? "Tất cả hồ sơ trong kỳ đã được chốt hoặc đóng."
+                  : "Danh sách việc cần làm sẽ xuất hiện khi có Lead thật trên hệ thống."
               }
             />
           )}

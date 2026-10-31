@@ -5,8 +5,8 @@ import { SESSION_COOKIE_NAME } from '@/lib/session-constants'
 /** Các path KHÔNG yêu cầu đăng nhập */
 const PUBLIC_PATHS = ['/api/auth/login', '/api/auth/register', '/api/health']
 
-/** Các prefix tài nguyên tĩnh — luôn bỏ qua */
-const STATIC_PREFIXES = ['/_next', '/uploads', '/favicon.ico', '/robots.txt', '/sitemap.xml']
+/** Các prefix tài nguyên tĩnh — luôn bỏ qua (đã loại bỏ /uploads để bắt buộc xác thực JWT cho tệp đính kèm nội bộ) */
+const STATIC_PREFIXES = ['/_next', '/favicon.ico', '/robots.txt', '/sitemap.xml']
 
 function applySecurityHeaders(res: NextResponse): NextResponse {
   res.headers.set('X-Content-Type-Options', 'nosniff');

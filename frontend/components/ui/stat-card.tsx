@@ -117,28 +117,28 @@ export function StatCard({
         style={{ background: `radial-gradient(circle at 100% 0%, rgb(var(${glowVar}) / 0.85) 0, transparent 58%)` }}
       />
 
-      <div className="relative flex items-center justify-between gap-3">
-        <span className="text-[12.5px] font-semibold text-slate-600 truncate">{label}</span>
+      <div className="relative flex items-center justify-between gap-2 sm:gap-3">
+        <span className="text-xs sm:text-[12.5px] font-semibold text-slate-600 truncate">{label}</span>
         {Icon && (
           <div
             className={cn(
-              "h-9 w-9 rounded-lg border flex items-center justify-center shrink-0 transition-transform duration-150",
+              "h-7 w-7 sm:h-9 sm:w-9 rounded-lg border flex items-center justify-center shrink-0 transition-transform duration-150",
               isInteractive && "group-hover:scale-105",
               tone.tile
             )}
           >
-            <Icon className="h-[18px] w-[18px]" />
+            <Icon className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
           </div>
         )}
       </div>
 
-      <div className="relative mt-3 flex items-end justify-between gap-2 min-h-[34px]">
+      <div className="relative mt-2 sm:mt-3 flex flex-wrap items-end justify-between gap-1.5 sm:gap-2 min-h-[28px] sm:min-h-[34px]">
         {hasValue ? (
-          <p className="text-[30px] font-bold tracking-[-0.035em] text-slate-900 kpi-number leading-none">
+          <p className="text-[22px] sm:text-[30px] font-bold tracking-[-0.035em] text-slate-900 kpi-number leading-none">
             {value}
           </p>
         ) : (
-          <p className="text-[14px] font-medium text-slate-500 leading-snug">Chưa có dữ liệu</p>
+          <p className="text-[13px] sm:text-[14px] font-medium text-slate-500 leading-snug">Chưa có dữ liệu</p>
         )}
 
         {badgeText && (
@@ -149,7 +149,7 @@ export function StatCard({
       </div>
 
       {hasValue && typeof progress === "number" && (
-        <div className="relative mt-3.5 h-1.5 w-full rounded-full bg-slate-200/70 overflow-hidden">
+        <div className="relative mt-2.5 sm:mt-3.5 h-1.5 w-full rounded-full bg-slate-200/70 overflow-hidden">
           <div
             className={cn("h-full rounded-full origin-left animate-bar-grow", tone.bar)}
             style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
@@ -158,14 +158,14 @@ export function StatCard({
       )}
 
       {(note || (isInteractive && actionHint)) && (
-        <div className="relative mt-3 flex items-center justify-between gap-2">
+        <div className="relative mt-2 sm:mt-3 flex items-center justify-between gap-2">
           {note && (
-            <p className="text-xs text-slate-500 leading-relaxed truncate" title={note}>
+            <p className="text-[11px] sm:text-xs text-slate-500 leading-relaxed truncate" title={note}>
               {note}
             </p>
           )}
           {isInteractive && (
-            <span className="inline-flex items-center gap-0.5 text-[11.5px] font-semibold text-blue-600 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:opacity-100 transition-all duration-150 shrink-0">
+            <span className="hidden sm:inline-flex items-center gap-0.5 text-[11.5px] font-semibold text-blue-600 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:opacity-100 transition-all duration-150 shrink-0">
               {actionHint || "Xem"}
               <ChevronRight className="h-3.5 w-3.5" />
             </span>
@@ -182,7 +182,7 @@ export function StatCard({
         onClick={onClick}
         aria-pressed={active}
         className={cn(
-          "group relative overflow-hidden text-left w-full p-5 crm-card-interactive",
+          "group relative overflow-hidden text-left w-full p-3.5 sm:p-5 crm-card-interactive",
           active && tone.activeRing,
           className
         )}
@@ -193,5 +193,5 @@ export function StatCard({
   }
 
   // No action → no hover/selected affordance
-  return <div className={cn("relative overflow-hidden crm-card p-5", className)}>{body}</div>;
+  return <div className={cn("relative overflow-hidden crm-card p-3.5 sm:p-5", className)}>{body}</div>;
 }

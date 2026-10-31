@@ -119,6 +119,16 @@ function cleanStaleNextDevLocks() {
       }
     }
   }
+
+  // Clear Turbopack dev cache so PostCSS / Tailwind changes never replay stale .sst cache entries
+  const frontendDevCache = path.join(rootDir, "frontend", ".next", "dev", "cache");
+  if (fs.existsSync(frontendDevCache)) {
+    try {
+      fs.rmSync(frontendDevCache, { recursive: true, force: true });
+    } catch {
+      // Ignore if actively held
+    }
+  }
 }
 
 freeDevPorts([3001, 3002]);

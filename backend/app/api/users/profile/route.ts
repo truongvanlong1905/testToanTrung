@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser, signToken, SESSION_COOKIE_NAME, UserSession } from "@/lib/auth";
+import {
+  getCurrentUser,
+  signToken,
+  invalidateUserSessionCache,
+  SESSION_COOKIE_NAME,
+  UserSession,
+} from "@/lib/auth";
 
 const UpdateProfileSchema = z.object({
   name: z.string().trim().min(2, "Họ và tên tối thiểu 2 ký tự").max(100),
@@ -34,6 +40,10 @@ export async function GET(req: NextRequest) {
         email: true,
         phone: true,
         role: true,
+        actorType: true,
+        department: true,
+        position: true,
+        appointedDecisionCode: true,
         initials: true,
         avatar: true,
         address: true,
@@ -55,7 +65,7 @@ export async function GET(req: NextRequest) {
       success: true,
       data: { user },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("GET /api/users/profile error:", error);
     return NextResponse.json(
       { success: false, error: { code: "INTERNAL_ERROR", message: "Lỗi tải thông tin hồ sơ" } },
@@ -100,7 +110,6 @@ async function handleUpdateProfile(req: NextRequest) {
       );
     }
 
-    // Kiểm tra xem email mới có bị trùng với tài khoản khác không
     if (normalizedEmail !== dbUser.email.toLowerCase()) {
       const existing = await prisma.user.findUnique({
         where: { email: normalizedEmail },
@@ -113,7 +122,6 @@ async function handleUpdateProfile(req: NextRequest) {
       }
     }
 
-    // Xử lý đổi mật khẩu nếu có nhập newPassword
     let newPasswordHash: string | undefined;
     if (newPassword && newPassword.trim().length > 0) {
       if (newPassword.trim().length < 6) {
@@ -138,7 +146,6 @@ async function handleUpdateProfile(req: NextRequest) {
       newPasswordHash = await bcrypt.hash(newPassword.trim(), 10);
     }
 
-    // Tạo lại initials từ tên mới
     const words = name.trim().split(/\s+/).filter(Boolean);
     const initials =
       words.length >= 2
@@ -164,6 +171,10 @@ async function handleUpdateProfile(req: NextRequest) {
         email: true,
         phone: true,
         role: true,
+        actorType: true,
+        department: true,
+        position: true,
+        appointedDecisionCode: true,
         initials: true,
         avatar: true,
         address: true,
@@ -173,15 +184,18 @@ async function handleUpdateProfile(req: NextRequest) {
       },
     });
 
-    // Cập nhật lại JWT cookie nếu tên / email thay đổi
     const newSessionPayload: UserSession = {
       userId: updatedUser.id,
       email: updatedUser.email,
       name: updatedUser.name,
       role: updatedUser.role as UserSession["role"],
+      actorType: (updatedUser.actorType as UserSession["actorType"]) || session.actorType,
+      department: updatedUser.department || session.department,
+      position: updatedUser.position || session.position,
       initials: updatedUser.initials,
     };
 
+    invalidateUserSessionCache(updatedUser.id);
     const newToken = signToken(newSessionPayload);
 
     const response = NextResponse.json({
@@ -203,10 +217,10 @@ async function handleUpdateProfile(req: NextRequest) {
     });
 
     return response;
-  } catch (error: any) {
+  } catch (error) {
     console.error("Update /api/users/profile error:", error);
     return NextResponse.json(
-      { success: false, error: { code: "INTERNAL_ERROR", message: error.message || "Lỗi cập nhật hồ sơ" } },
+      { success: false, error: { code: "INTERNAL_ERROR", message: "Lỗi cập nhật hồ sơ cá nhân" } },
       { status: 500 }
     );
   }

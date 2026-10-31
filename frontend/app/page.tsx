@@ -4,17 +4,18 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
-  Plus,
   Loader2,
   SlidersHorizontal,
   FileSpreadsheet,
   Upload,
+  Sparkles,
 } from "lucide-react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { StatsCards } from "@/components/modules/leads/StatsCards";
 import { LeadFilters } from "@/components/modules/leads/LeadFilters";
 import { LeadTable } from "@/components/modules/leads/LeadTable";
+import { AiQuickLeadBar, AiLeadDraft } from "@/components/modules/leads/AiQuickLeadBar";
 import { OverviewView } from "@/components/modules/reports/OverviewView";
 import { Lead, LeadStatus } from "@/types/lead";
 import { PageHeader } from "@/components/ui/page-header";
@@ -61,16 +62,18 @@ const NotificationsView = dynamic(
   () => import("@/components/shared/NotificationsView").then((m) => m.NotificationsView),
   { loading: viewLoading }
 );
-// Only mounted while open (see render below) so their code is not downloaded up-front.
-const LeadDetailModal = dynamic(
-  () => import("@/components/modules/leads/LeadDetailModal").then((m) => m.LeadDetailModal)
-);
-const NewLeadModal = dynamic(
-  () => import("@/components/modules/leads/NewLeadModal").then((m) => m.NewLeadModal)
-);
-const ImportLeadsModal = dynamic(
-  () => import("@/components/modules/leads/ImportLeadsModal").then((m) => m.ImportLeadsModal)
-);
+const loadLeadDetailModal = () =>
+  import("@/components/modules/leads/LeadDetailModal").then((m) => m.LeadDetailModal);
+const loadNewLeadModal = () =>
+  import("@/components/modules/leads/NewLeadModal").then((m) => m.NewLeadModal);
+const loadImportLeadsModal = () =>
+  import("@/components/modules/leads/ImportLeadsModal").then((m) => m.ImportLeadsModal);
+
+// Only mounted while open (see render below), with chunks preloaded on browser idle / button hover
+// so clicking "Thêm Lead / AI" opens in a single frame with zero network wait.
+const LeadDetailModal = dynamic(loadLeadDetailModal);
+const NewLeadModal = dynamic(loadNewLeadModal);
+const ImportLeadsModal = dynamic(loadImportLeadsModal);
 
 function parseLeadCreatedAt(dateStr: string): Date | null {
   if (!dateStr) return null;
@@ -135,18 +138,30 @@ export default function LeadsDashboardPage() {
   // Modals state
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
+  const [aiLeadDraft, setAiLeadDraft] = useState<AiLeadDraft | null>(null);
+  const [aiLeadWarning, setAiLeadWarning] = useState<string | null>(null);
   const [isImportLeadsOpen, setIsImportLeadsOpen] = useState(false);
 
   // Toast feedback state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isExportingLeads, setIsExportingLeads] = useState(false);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage(null);
     }, 3200);
-  };
+  }, []);
+
+  // Preload modal chunks during browser idle time after initial hydration so first modal click is instant
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadNewLeadModal();
+      void loadLeadDetailModal();
+      void loadImportLeadsModal();
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // Auth Guard
   useEffect(() => {
@@ -270,7 +285,7 @@ export default function LeadsDashboardPage() {
   // the status drill-down is applied; any other filter switches them to filtered counts.
   const nonStatusFilterCount = activeFilterCount - (statusFilter !== "all" ? 1 : 0);
 
-  const handleResetFilters = () => {
+  const handleResetFilters = useCallback(() => {
     setSearchQuery("");
     setStatusFilter("all");
     setSourceFilter("all");
@@ -280,60 +295,102 @@ export default function LeadsDashboardPage() {
     setCustomDateFrom("");
     setCustomDateTo("");
     showToast("Đã đặt lại bộ lọc tìm kiếm");
-  };
+  }, [showToast]);
 
-  const handleAddLead = () => {
+  const handleAddLead = useCallback(() => {
     showToast("Đã lưu Lead mới vào cơ sở dữ liệu");
-    fetchLeads();
-  };
+    void fetchLeads();
+  }, [showToast, fetchLeads]);
 
-  const handleUpdateStatus = async (id: string, newStatus: LeadStatus, reason?: string) => {
-    try {
-      const res = await fetch(`/api/leads/${id}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus, reason }),
-      });
+  const handleUpdateStatus = useCallback(
+    async (id: string, newStatus: LeadStatus, reason?: string) => {
+      try {
+        const res = await fetch(`/api/leads/${id}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: newStatus, reason }),
+        });
 
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Lỗi cập nhật trạng thái");
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.error?.message || "Lỗi cập nhật trạng thái");
+        }
+
+        setLeads((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, status: newStatus } : item))
+        );
+        setSelectedLead((prev) => (prev && prev.id === id ? { ...prev, status: newStatus } : prev));
+        showToast(json.message || `Đã cập nhật trạng thái thành "${newStatus}"`);
+        void fetchLeads();
+        return true;
+      } catch (err: any) {
+        showToast(err.message || "Không thể cập nhật trạng thái");
+        throw err;
       }
+    },
+    [showToast, fetchLeads]
+  );
 
-      setLeads((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, status: newStatus } : item))
-      );
-      setSelectedLead((prev) => (prev && prev.id === id ? { ...prev, status: newStatus } : prev));
-      showToast(json.message || `Đã cập nhật trạng thái thành "${newStatus}"`);
-      fetchLeads();
-      return true;
-    } catch (err: any) {
-      showToast(err.message || "Không thể cập nhật trạng thái");
-      throw err;
-    }
-  };
+  const handleReassignSales = useCallback(
+    async (leadId: string, newSalesId: string, reason: string) => {
+      try {
+        const res = await fetch(`/api/leads/${leadId}/assign`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newSalesPersonId: newSalesId, reason }),
+        });
 
-  const handleReassignSales = async (leadId: string, newSalesId: string, reason: string) => {
-    try {
-      const res = await fetch(`/api/leads/${leadId}/assign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newSalesPersonId: newSalesId, reason }),
-      });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.error?.message || "Lỗi chuyển bàn giao");
+        }
 
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Lỗi chuyển bàn giao");
+        showToast(json.message || "Đã bàn giao Lead thành công");
+        void fetchLeads();
+        return true;
+      } catch (err: any) {
+        showToast(err.message || "Lỗi chuyển bàn giao Sales");
+        throw err;
       }
+    },
+    [showToast, fetchLeads]
+  );
 
-      showToast(json.message || "Đã bàn giao Lead thành công");
-      fetchLeads();
-      return true;
-    } catch (err: any) {
-      showToast(err.message || "Lỗi chuyển bàn giao Sales");
-      throw err;
-    }
-  };
+  const handleSelectLead = useCallback((lead: Lead) => {
+    setSelectedLead(lead);
+  }, []);
+
+  const handleOpenNewLead = useCallback(() => {
+    setAiLeadDraft(null);
+    setAiLeadWarning(null);
+    setIsNewLeadOpen(true);
+  }, []);
+
+  const handleOpenPrefilledModal = useCallback((draft: AiLeadDraft, warning?: string) => {
+    setAiLeadDraft(draft);
+    setAiLeadWarning(warning || null);
+    setIsNewLeadOpen(true);
+  }, []);
+
+  const handleQuickLeadCreated = useCallback(
+    (_lead: Lead, msg: string) => {
+      showToast(msg);
+      void fetchLeads();
+    },
+    [showToast, fetchLeads]
+  );
+
+  const handleFilterStatus = useCallback((status: string) => {
+    setStatusFilter(status);
+    if (status !== "all") setShowFilters(true);
+  }, []);
+
+  const handleQuickUpdateStatus = useCallback(
+    (lead: Lead, newStatus: LeadStatus) => {
+      void handleUpdateStatus(lead.id, newStatus);
+    },
+    [handleUpdateStatus]
+  );
 
   const getPageMeta = (tab: string): { title: string; group: string } => {
     switch (tab) {
@@ -424,12 +481,13 @@ export default function LeadsDashboardPage() {
                 title="Quản lý Lead"
                 description="Theo dõi cơ hội dự án Màn hình LED & Bảng điện tử từ tiếp nhận đến chốt hợp đồng."
                 actions={
-                  <>
+                  <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
                     <Button
                       variant={showFilters || activeFilterCount > 0 ? "subtle" : "secondary"}
                       size="md"
                       onClick={() => setShowFilters((v) => !v)}
                       leftIcon={<SlidersHorizontal className="w-3.5 h-3.5" />}
+                      className="w-full sm:w-auto justify-center"
                     >
                       Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
                     </Button>
@@ -439,6 +497,7 @@ export default function LeadsDashboardPage() {
                       size="md"
                       onClick={() => setIsImportLeadsOpen(true)}
                       leftIcon={<Upload className="w-3.5 h-3.5 text-blue-600" />}
+                      className="w-full sm:w-auto justify-center"
                     >
                       Import &amp; Chia Sales
                     </Button>
@@ -449,6 +508,7 @@ export default function LeadsDashboardPage() {
                       isLoading={isExportingLeads}
                       disabled={!hasLoadedLeads}
                       leftIcon={<FileSpreadsheet className="w-4 h-4 text-emerald-600" />}
+                      className="w-full sm:w-auto justify-center"
                       onClick={async () => {
                         const activeParts: string[] = [];
                         if (statusFilter !== "all") activeParts.push(`Trạng thái: ${statusFilter}`);
@@ -483,13 +543,21 @@ export default function LeadsDashboardPage() {
                     <Button
                       variant="primary"
                       size="md"
-                      onClick={() => setIsNewLeadOpen(true)}
-                      leftIcon={<Plus className="w-4 h-4" />}
+                      onClick={handleOpenNewLead}
+                      leftIcon={<Sparkles className="w-4 h-4" />}
+                      className="w-full sm:w-auto justify-center"
                     >
-                      Thêm Lead
+                      Thêm Lead / AI
                     </Button>
-                  </>
+                  </div>
                 }
+              />
+
+              {/* AI 1-Click Fast Lead Intake Bar */}
+              <AiQuickLeadBar
+                onLeadCreated={handleQuickLeadCreated}
+                onOpenPrefilledModal={handleOpenPrefilledModal}
+                onSelectLead={handleSelectLead}
               />
 
               {leadLoadError && (
@@ -516,10 +584,7 @@ export default function LeadsDashboardPage() {
                     leads={displayedLeads}
                     stats={nonStatusFilterCount === 0 ? leadStats : undefined}
                     activeStatus={statusFilter}
-                    onFilterStatus={(status) => {
-                      setStatusFilter(status);
-                      if (status !== "all") setShowFilters(true);
-                    }}
+                    onFilterStatus={handleFilterStatus}
                   />
 
                   {showFilters && (
@@ -554,11 +619,9 @@ export default function LeadsDashboardPage() {
                     )}
                     <LeadTable
                       leads={displayedLeads}
-                      onSelectLead={(lead) => setSelectedLead(lead)}
-                      onCreateLead={() => setIsNewLeadOpen(true)}
-                      onQuickUpdateStatus={(lead, newStatus) => {
-                        void handleUpdateStatus(lead.id, newStatus);
-                      }}
+                      onSelectLead={handleSelectLead}
+                      onCreateLead={handleOpenNewLead}
+                      onQuickUpdateStatus={handleQuickUpdateStatus}
                       hasActiveFilters={activeFilterCount > 0}
                       itemsPerPage={10}
                     />
@@ -634,8 +697,14 @@ export default function LeadsDashboardPage() {
       {isNewLeadOpen && (
         <NewLeadModal
           isOpen={isNewLeadOpen}
-          onClose={() => setIsNewLeadOpen(false)}
+          onClose={() => {
+            setIsNewLeadOpen(false);
+            setAiLeadDraft(null);
+            setAiLeadWarning(null);
+          }}
           onAddLead={handleAddLead}
+          initialDraft={aiLeadDraft}
+          initialWarning={aiLeadWarning}
         />
       )}
 

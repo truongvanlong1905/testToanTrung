@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,11 +28,54 @@ const SIZE_CLASSES: Record<NonNullable<ModalProps["size"]>, string> = {
   xl: "max-w-4xl",
 };
 
+const FOCUSABLE_SELECTOR =
+  'input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
+let activeScrollLocks = 0;
+
+export function lockBodyScroll(): void {
+  if (typeof document === "undefined") return;
+  activeScrollLocks += 1;
+  if (activeScrollLocks === 1) {
+    document.body.classList.add("overflow-locked");
+  }
+}
+
+export function unlockBodyScroll(): void {
+  if (typeof document === "undefined") return;
+  activeScrollLocks = Math.max(0, activeScrollLocks - 1);
+  if (activeScrollLocks === 0) {
+    document.body.classList.remove("overflow-locked");
+  }
+}
+
+export function recordModalOpenMetric(modalTitle: string, startMs: number): void {
+  if (typeof window === "undefined" || typeof performance === "undefined") return;
+  requestAnimationFrame(() => {
+    const paintMs = Number((performance.now() - startMs).toFixed(2));
+    const win = window as unknown as {
+      __TT_MODAL_PERF__?: Array<{ title: string; paintMs: number; timestamp: string }>;
+    };
+    if (!Array.isArray(win.__TT_MODAL_PERF__)) {
+      win.__TT_MODAL_PERF__ = [];
+    }
+    win.__TT_MODAL_PERF__.push({
+      title: modalTitle,
+      paintMs,
+      timestamp: new Date().toISOString(),
+    });
+    if (win.__TT_MODAL_PERF__.length > 50) {
+      win.__TT_MODAL_PERF__.shift();
+    }
+  });
+}
+
 /**
- * Shared dialog: Esc to close, body scroll lock, backdrop click, consistent
- * header / scrollable body / sticky footer layout and entrance motion.
+ * Shared dialog: Esc to close, ref-counted body scroll lock (0px layout shift),
+ * focus management + focus trap + focus restoration, GPU-composited entrance motion
+ * (transform + opacity only, no expensive full-screen backdrop-filter blur).
  */
-export function Modal({
+export const Modal = React.memo(function Modal({
   open,
   onClose,
   title,
@@ -44,34 +88,97 @@ export function Modal({
   preventClose = false,
   bodyClassName,
 }: ModalProps) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const preventCloseRef = useRef(preventClose);
+
   useEffect(() => {
-    if (!open) return;
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !preventClose) onClose();
+    onCloseRef.current = onClose;
+    preventCloseRef.current = preventClose;
+  }, [onClose, preventClose]);
+
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return;
+
+    const openStartMs = typeof performance !== "undefined" ? performance.now() : 0;
+    const previousFocused = document.activeElement as HTMLElement | null;
+    lockBodyScroll();
+    recordModalOpenMetric(title, openStartMs);
+
+    // Move focus inside dialog on next animation frame so initial paint is never blocked
+    const rafId = requestAnimationFrame(() => {
+      const container = dialogRef.current;
+      if (!container) return;
+      const firstInput = container.querySelector<HTMLElement>(
+        '[data-autofocus], input:not([disabled]):not([type="hidden"]):not([type="file"]), textarea:not([disabled]), select:not([disabled])'
+      );
+      if (firstInput) {
+        firstInput.focus({ preventScroll: true });
+      } else {
+        container.focus({ preventScroll: true });
+      }
+    });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (!preventCloseRef.current) {
+          event.stopPropagation();
+          onCloseRef.current();
+        }
+        return;
+      }
+
+      if (event.key === "Tab" && dialogRef.current) {
+        const focusable = Array.from(
+          dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+        ).filter((el) => el.offsetParent !== null);
+        if (focusable.length === 0) return;
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
     };
-    document.addEventListener("keydown", handleKey);
-    document.body.classList.add("overflow-locked");
+
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener("keydown", handleKey);
-      document.body.classList.remove("overflow-locked");
+      cancelAnimationFrame(rafId);
+      document.removeEventListener("keydown", handleKeyDown);
+      unlockBodyScroll();
+      if (previousFocused && typeof previousFocused.focus === "function") {
+        try {
+          previousFocused.focus({ preventScroll: true });
+        } catch {
+          // Ignore if trigger element was unmounted
+        }
+      }
     };
-  }, [open, onClose, preventClose]);
+  }, [open, title]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/50 animate-fade-in"
+      className="fixed inset-0 z-[90] flex items-center justify-center p-4 sm:p-6 bg-slate-950/60 animate-fade-in"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !preventClose) onClose();
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={cn(
-          "w-full bg-elevated border border-slate-200 shadow-floating flex flex-col max-h-[94vh] sm:max-h-[90vh] overflow-hidden rounded-t-2xl sm:rounded-2xl animate-scale-in",
+          "modal-panel w-full my-auto bg-elevated border border-slate-200 shadow-floating flex flex-col max-h-[86vh] overflow-hidden rounded-2xl animate-scale-in focus:outline-none",
           SIZE_CLASSES[size]
         )}
       >
@@ -83,7 +190,9 @@ export function Modal({
               </div>
             )}
             <div className="min-w-0">
-              <h2 className="text-section-title truncate">{title}</h2>
+              <h2 id={titleId} className="text-section-title truncate">
+                {title}
+              </h2>
               {description && <div className="text-caption mt-0.5">{description}</div>}
             </div>
           </div>
@@ -111,7 +220,7 @@ export function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
-}
-
+});

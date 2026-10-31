@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser, unauthorizedResponse } from "@/lib/auth";
+import { getCurrentUser, canAccessAllLeads, unauthorizedResponse } from "@/lib/auth";
 
 const SearchQuery = z.string().trim().min(2).max(80);
 
@@ -22,36 +22,69 @@ export async function GET(req: NextRequest) {
       user.role === "ADMIN" ||
       user.role === "DIRECTOR";
 
+    const canSearchLeads =
+      canAccessAllLeads(user) ||
+      user.role === "SALES" ||
+      user.department === "SALES";
+
+    const canSearchAds =
+      isPrivileged ||
+      user.role === "ADS" ||
+      user.department === "ADS" ||
+      user.role === "MARKETING" ||
+      user.department === "MARKETING";
+
+    const leadOwnerFilter = canAccessAllLeads(user)
+      ? {}
+      : {
+          OR: [
+            { salesPersonId: user.userId },
+            { createdById: user.userId },
+            { salesPersonId: null },
+          ],
+        };
+
     const [leads, campaigns, keywords, users] = await Promise.all([
-      prisma.lead.findMany({
-        where: {
-          OR: [
-            { code: { contains: query } },
-            { customerName: { contains: query } },
-            { companyName: { contains: query } },
-            { phone: { contains: query } },
-            { product: { contains: query } },
-          ],
-        },
-        select: { id: true, code: true, customerName: true, companyName: true, status: true },
-        take: 5,
-      }),
-      prisma.marketingCampaign.findMany({
-        where: {
-          OR: [
-            { name: { contains: query } },
-            { code: { contains: query } },
-            { platform: { contains: query } },
-          ],
-        },
-        select: { id: true, name: true, platform: true },
-        take: 4,
-      }),
-      prisma.keywordMetric.findMany({
-        where: { keyword: { contains: query } },
-        select: { id: true, keyword: true, source: true },
-        take: 4,
-      }),
+      canSearchLeads
+        ? prisma.lead.findMany({
+            where: {
+              AND: [
+                leadOwnerFilter,
+                {
+                  OR: [
+                    { code: { contains: query } },
+                    { customerName: { contains: query } },
+                    { companyName: { contains: query } },
+                    { phone: { contains: query } },
+                    { product: { contains: query } },
+                  ],
+                },
+              ],
+            },
+            select: { id: true, code: true, customerName: true, companyName: true, status: true },
+            take: 5,
+          })
+        : Promise.resolve([]),
+      canSearchAds
+        ? prisma.marketingCampaign.findMany({
+            where: {
+              OR: [
+                { name: { contains: query } },
+                { code: { contains: query } },
+                { platform: { contains: query } },
+              ],
+            },
+            select: { id: true, name: true, platform: true },
+            take: 4,
+          })
+        : Promise.resolve([]),
+      canSearchAds
+        ? prisma.keywordMetric.findMany({
+            where: { keyword: { contains: query } },
+            select: { id: true, keyword: true, source: true },
+            take: 4,
+          })
+        : Promise.resolve([]),
       isPrivileged
         ? prisma.user.findMany({
             where: {

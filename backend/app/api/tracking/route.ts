@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser, canAccessAllLeads, unauthorizedResponse } from "@/lib/auth";
+import { getCurrentUser, canAccessAllLeads, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
 import { z } from "zod";
 
 const requestCounts = new Map<string, { count: number; resetAt: number }>();
@@ -77,6 +77,21 @@ export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser(req);
     if (!user) return unauthorizedResponse();
+
+    const canViewTracking =
+      user.actorType === "ADMIN" ||
+      user.actorType === "DIRECTOR" ||
+      user.role === "ADMIN" ||
+      user.role === "DIRECTOR" ||
+      user.role === "MARKETING" ||
+      user.department === "MARKETING" ||
+      user.role === "ADS" ||
+      user.department === "ADS";
+
+    if (!canViewTracking) {
+      return forbiddenResponse("Tài khoản của bạn không có quyền truy cập dữ liệu Tracking / Analytics");
+    }
+
     const fullAccess = canAccessAllLeads(user);
 
     const [events, syncJobs, siteStats, totalEvents] = await Promise.all([

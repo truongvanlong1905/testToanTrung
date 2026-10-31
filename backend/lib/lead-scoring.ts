@@ -11,6 +11,27 @@ export function formatVndNumber(amount: number): string {
   return `${Math.round(amount).toLocaleString("vi-VN")} đ`;
 }
 
+/**
+ * Extracts the highest numeric suffix from existing business codes (e.g. TT-LED-2610-0003 -> 3)
+ * so deleting a historical Lead, Quote, or Decision never causes a P2002 Unique constraint collision.
+ */
+export function extractMaxCodeSuffix(
+  records: Array<{ code: string }>,
+  fallbackCount = 0
+): number {
+  let maxSeq = fallbackCount;
+  for (const item of records) {
+    const match = item.code?.match(/-(\d+)$/);
+    if (match) {
+      const parsed = parseInt(match[1], 10);
+      if (Number.isFinite(parsed) && parsed > maxSeq) {
+        maxSeq = parsed;
+      }
+    }
+  }
+  return maxSeq;
+}
+
 export function computeLeadScore(input: {
   status: string;
   estimatedValue?: string | null;
@@ -107,4 +128,3 @@ export function computeLeadSla(input: {
 
   return { slaStatus: "ON_TRACK", slaLabel: "Đúng tiến độ SLA" };
 }
-

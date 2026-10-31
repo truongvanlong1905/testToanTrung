@@ -50,23 +50,20 @@ export async function GET(req: NextRequest) {
   try {
     const reportFilter = buildReportVisibilityFilter(user);
 
-    const [reports, unreadCount] = await Promise.all([
-      prisma.departmentReport.findMany({
-        where: reportFilter,
-        include: {
-          createdBy: { select: { name: true, role: true, initials: true } },
-          reads: { where: { userId: user.userId }, select: { id: true } },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 100,
-      }),
-      prisma.departmentReport.count({
-        where: {
-          ...reportFilter,
-          reads: { none: { userId: user.userId } },
-        },
-      }),
-    ]);
+    const reports = await prisma.departmentReport.findMany({
+      where: reportFilter,
+      include: {
+        createdBy: { select: { name: true, role: true, initials: true } },
+        reads: { where: { userId: user.userId }, select: { id: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+
+    const unreadCount = reports.reduce(
+      (acc, item) => acc + (item.reads.length === 0 ? 1 : 0),
+      0
+    );
 
     return NextResponse.json({
       success: true,

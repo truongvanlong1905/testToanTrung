@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, canAccessAllLeads, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
-import { computeLeadScore, formatVndNumber } from "@/lib/lead-scoring";
+import { computeLeadScore, formatVndNumber, extractMaxCodeSuffix } from "@/lib/lead-scoring";
 
 const CreateQuoteSchema = z.object({
   moduleSpec: z.string().trim().min(3, "Vui lòng chọn dòng module màn hình LED"),
@@ -117,8 +117,11 @@ export async function POST(
 
     const now = new Date();
     const ym = `${String(now.getFullYear()).slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const qCount = await prisma.leadQuote.count();
-    const quoteCode = `BG-TT-${ym}-${String(qCount + 1).padStart(3, "0")}`;
+    const existingQuoteCodes = await prisma.leadQuote.findMany({
+      select: { code: true },
+    });
+    const maxQuoteSeq = extractMaxCodeSuffix(existingQuoteCodes, existingQuoteCodes.length);
+    const quoteCode = `BG-TT-${ym}-${String(maxQuoteSeq + 1).padStart(3, "0")}`;
 
     const quoteStatus = needsDirector ? "PENDING_DIRECTOR" : "SENT";
 
@@ -313,4 +316,3 @@ export async function PATCH(
     );
   }
 }
-

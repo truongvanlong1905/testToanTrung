@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
-    const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:3002";
+    const apiBaseUrl = process.env.API_BASE_URL || "http://127.0.0.1:3002";
     if (!apiBaseUrl) {
       throw new Error("API_BASE_URL must be configured for the web application.");
     }

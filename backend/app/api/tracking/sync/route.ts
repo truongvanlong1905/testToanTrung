@@ -1,11 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser, unauthorizedResponse } from "@/lib/auth";
+import { getCurrentUser, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser(req);
     if (!user) return unauthorizedResponse();
+
+    const canTriggerSync =
+      user.actorType === "ADMIN" ||
+      user.actorType === "DIRECTOR" ||
+      user.role === "ADMIN" ||
+      user.role === "DIRECTOR" ||
+      user.role === "MARKETING" ||
+      user.department === "MARKETING" ||
+      user.role === "ADS" ||
+      user.department === "ADS";
+
+    if (!canTriggerSync) {
+      return forbiddenResponse("Chỉ nhân sự Marketing, Quảng cáo, Giám đốc hoặc Admin mới có quyền đồng bộ Tracking");
+    }
 
     const body = await req.json();
     const validServices = ["GOOGLE_ADS", "GA4", "SEARCH_CONSOLE"];
@@ -35,11 +49,18 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({
-      success: false,
-      message: errorMessage,
-      data: { job },
-    }, { status: missing.length ? 400 : 501 });
+    return NextResponse.json(
+      {
+        success: false,
+        message: errorMessage,
+        error: {
+          code: status,
+          message: errorMessage,
+        },
+        data: { job },
+      },
+      { status: missing.length ? 400 : 501 }
+    );
   } catch (error) {
     console.error("POST /api/tracking/sync error:", error);
     return NextResponse.json(

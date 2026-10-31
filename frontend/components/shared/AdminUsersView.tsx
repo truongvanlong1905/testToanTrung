@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   UserPlus,
   AlertCircle,
@@ -32,6 +32,7 @@ import {
   PageSkeleton,
   SearchInput,
 } from "@/components/ui/feedback-states";
+import { invalidateSharedJson } from "@/lib/shared-fetch";
 
 interface UserRecord {
   id: string;
@@ -88,6 +89,388 @@ const ACTOR_FILTER_OPTIONS = [
   { id: "USER", label: "USER (Các phòng ban)" },
 ] as const;
 
+interface EditUserModalProps {
+  editingUser: UserRecord | null;
+  departments: DepartmentRecord[];
+  decisions: PromotionDecisionRecord[];
+  onClose: () => void;
+  onSaved: (msg: string) => void;
+}
+
+const EditUserModal = React.memo(function EditUserModal({
+  editingUser,
+  departments,
+  decisions,
+  onClose,
+  onSaved,
+}: EditUserModalProps) {
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editActorType, setEditActorType] = useState<"ADMIN" | "DIRECTOR" | "USER">("USER");
+  const [editDepartment, setEditDepartment] = useState("SALES");
+  const [editPosition, setEditPosition] = useState("Nhân viên");
+  const [editDecisionId, setEditDecisionId] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+  const [editHometown, setEditHometown] = useState("");
+  const [editAchievements, setEditAchievements] = useState("");
+  const [editAvatar, setEditAvatar] = useState("");
+  const [editIsActive, setEditIsActive] = useState(true);
+  const [editNewPassword, setEditNewPassword] = useState("");
+  const [isUpdatingUser, setIsUpdatingUser] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editingUser) {
+      setEditName(editingUser.name || "");
+      setEditEmail(editingUser.email || "");
+      setEditPhone(editingUser.phone || "");
+      const resolvedActor =
+        editingUser.actorType ||
+        (editingUser.role === "ADMIN"
+          ? "ADMIN"
+          : editingUser.role === "DIRECTOR"
+            ? "DIRECTOR"
+            : "USER");
+      setEditActorType(resolvedActor);
+      setEditDepartment(
+        editingUser.department || (resolvedActor === "USER" ? editingUser.role : "SALES")
+      );
+      setEditPosition(
+        editingUser.position ||
+          (resolvedActor === "ADMIN"
+            ? "Quản trị hệ thống"
+            : resolvedActor === "DIRECTOR"
+              ? "Giám đốc"
+              : "Nhân viên")
+      );
+      setEditDecisionId("");
+      setEditAddress(editingUser.address || "");
+      setEditHometown(editingUser.hometown || "");
+      setEditAchievements(editingUser.achievements || "");
+      setEditAvatar(editingUser.avatar || "");
+      setEditIsActive(editingUser.isActive !== false);
+      setEditNewPassword("");
+      setEditError(null);
+    }
+  }, [editingUser]);
+
+  const handleEditAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingAvatar(true);
+      const formData = new FormData();
+      formData.set("file", file);
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error?.message || "Lỗi tải ảnh");
+      }
+      setEditAvatar(json.data.fileUrl);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Không tải được ảnh đại diện");
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  const handleSaveEditUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setIsUpdatingUser(true);
+    setEditError(null);
+
+    try {
+      const effectiveDept =
+        editActorType === "ADMIN"
+          ? "ADMIN_SYS"
+          : editActorType === "DIRECTOR"
+            ? "BOARD"
+            : editDepartment;
+      const effectivePos =
+        editActorType === "ADMIN"
+          ? "Quản trị hệ thống"
+          : editActorType === "DIRECTOR"
+            ? "Giám đốc"
+            : editPosition;
+
+      const res = await fetch(`/api/users/${editingUser.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editName.trim(),
+          email: editEmail.trim(),
+          phone: editPhone.trim() || null,
+          actorType: editActorType,
+          department: effectiveDept,
+          position: effectivePos,
+          role: editActorType === "USER" ? effectiveDept : editActorType,
+          decisionId: editDecisionId || null,
+          address: editAddress.trim() || null,
+          hometown: editHometown.trim() || null,
+          achievements: editAchievements.trim() || null,
+          avatar: editAvatar.trim() || null,
+          isActive: editIsActive,
+          newPassword: editNewPassword.trim() || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error?.message || "Không thể cập nhật tài khoản");
+      }
+
+      invalidateSharedJson("/api/users");
+      onClose();
+      onSaved(json.message || "Đã lưu thông tin tài khoản");
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Lỗi cập nhật tài khoản");
+    } finally {
+      setIsUpdatingUser(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={Boolean(editingUser)}
+      onClose={onClose}
+      preventClose={isUpdatingUser}
+      size="lg"
+      title={editingUser ? `Phân quyền & Hồ sơ: ${editingUser.name}` : "Chỉnh sửa tài khoản"}
+      description="Cập nhật Tác nhân (ADMIN / GIÁM ĐỐC / USER), Phòng ban và Chức vụ (yêu cầu Quyết định của Giám đốc khi bổ nhiệm Trưởng phòng/Trưởng ban)"
+      icon={
+        editAvatar ? (
+          <img src={editAvatar} alt={editName} className="w-full h-full rounded-lg object-cover" />
+        ) : (
+          <span className="text-xs font-semibold">{editingUser?.initials}</span>
+        )
+      }
+      footer={
+        <div className="flex items-center justify-end gap-2.5">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={isUpdatingUser}
+            onClick={onClose}
+          >
+            Hủy
+          </Button>
+          <Button
+            type="submit"
+            form="edit-user-form"
+            variant="primary"
+            isLoading={isUpdatingUser}
+            leftIcon={<Save className="w-4 h-4" />}
+          >
+            Lưu thay đổi
+          </Button>
+        </div>
+      }
+    >
+      {editingUser && (
+        <form id="edit-user-form" onSubmit={handleSaveEditUser} className="space-y-4">
+          {editError && (
+            <div className="p-3 bg-rose-50 text-rose-700 rounded-lg border border-rose-200 flex items-center gap-2 text-xs">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{editError}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="crm-label">
+                Họ và tên <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="crm-input"
+              />
+            </div>
+
+            <div>
+              <label className="crm-label">
+                Email đăng nhập <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="email"
+                required
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                className="crm-input font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="crm-label">Tác nhân hệ thống (Actor)</label>
+              <select
+                value={editActorType}
+                onChange={(e) =>
+                  setEditActorType(e.target.value as "ADMIN" | "DIRECTOR" | "USER")
+                }
+                className="crm-select"
+              >
+                <option value="USER">USER — Nhân sự thuộc các Phòng ban</option>
+                <option value="DIRECTOR">GIÁM ĐỐC — Ban Giám Đốc</option>
+                <option value="ADMIN">ADMIN — Quản trị hệ thống</option>
+              </select>
+            </div>
+
+            {editActorType === "USER" && (
+              <div>
+                <label className="crm-label">Phòng ban (trong USER)</label>
+                <select
+                  value={editDepartment}
+                  onChange={(e) => setEditDepartment(e.target.value)}
+                  className="crm-select"
+                >
+                  {departments.map((d) => (
+                    <option key={d.code} value={d.code}>
+                      {d.name} ({d.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {editActorType === "USER" && (
+              <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                <div>
+                  <label className="crm-label">Chức vụ trong Phòng ban</label>
+                  <select
+                    value={editPosition}
+                    onChange={(e) => setEditPosition(e.target.value)}
+                    className="crm-select"
+                  >
+                    <option value="Nhân viên">Nhân viên (Mặc định)</option>
+                    <option value="Trưởng nhóm">Trưởng nhóm (Cần QĐ Giám đốc)</option>
+                    <option value="Phó phòng">Phó phòng (Cần QĐ Giám đốc)</option>
+                    <option value="Trưởng ban">Trưởng ban (Cần QĐ Giám đốc)</option>
+                    <option value="Trưởng phòng">Trưởng phòng (Cần QĐ Giám đốc)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="crm-label">
+                    Căn cứ Quyết định Giám đốc ký (khi nâng chức)
+                  </label>
+                  <select
+                    value={editDecisionId}
+                    onChange={(e) => setEditDecisionId(e.target.value)}
+                    className="crm-select"
+                  >
+                    <option value="">
+                      {editingUser.appointedDecisionCode
+                        ? `Đang áp dụng: ${editingUser.appointedDecisionCode}`
+                        : "-- Chọn thông báo Giám đốc đã ký --"}
+                    </option>
+                    {decisions
+                      .filter((d) => d.targetUserId === editingUser.id)
+                      .map((d) => (
+                        <option key={d.id} value={d.id}>
+                          [{d.code}] Bổ nhiệm {d.newPosition} ({d.signedByName})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="crm-label">Số điện thoại</label>
+              <input
+                type="tel"
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                placeholder="0909 xxx xxx"
+                className="crm-input"
+              />
+            </div>
+
+            <div>
+              <label className="crm-label">Địa chỉ cư trú</label>
+              <input
+                type="text"
+                value={editAddress}
+                onChange={(e) => setEditAddress(e.target.value)}
+                className="crm-input"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="crm-label">Ảnh đại diện (Avatar)</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={editAvatar}
+                onChange={(e) => setEditAvatar(e.target.value)}
+                placeholder="URL ảnh đại diện..."
+                className="crm-input font-mono flex-1"
+              />
+              <label className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg bg-slate-100 hover:bg-slate-200/80 border border-slate-200 text-xs font-medium text-slate-700 cursor-pointer shrink-0">
+                <Camera className="w-3.5 h-3.5" />
+                <span>{isUploadingAvatar ? "Đang tải..." : "Tải ảnh"}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleEditAvatarUpload}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+            <div>
+              <label className="crm-label">Đặt lại mật khẩu mới (Tùy chọn)</label>
+              <input
+                type="text"
+                value={editNewPassword}
+                onChange={(e) => setEditNewPassword(e.target.value)}
+                placeholder="Bỏ trống nếu giữ nguyên mật khẩu..."
+                className="crm-input font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="crm-label">Trạng thái truy cập</label>
+              <button
+                type="button"
+                onClick={() => setEditIsActive((prev) => !prev)}
+                className={cn(
+                  "w-full h-9 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 border transition-colors cursor-pointer",
+                  editIsActive
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-rose-50 text-rose-700 border-rose-200"
+                )}
+              >
+                {editIsActive ? (
+                  <>
+                    <Unlock className="w-3.5 h-3.5" />
+                    <span>Đang hoạt động (Cho phép đăng nhập)</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Tạm khóa / Chờ Admin duyệt</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+});
+
 export function AdminUsersView() {
   const [activeSubTab, setActiveSubTab] = useState<"actors" | "departments" | "promotions">("actors");
   const [users, setUsers] = useState<UserRecord[]>([]);
@@ -130,24 +513,8 @@ export function AdminUsersView() {
   const [isSigningPromo, setIsSigningPromo] = useState(false);
   const [applyingDecisionId, setApplyingDecisionId] = useState<string | null>(null);
 
-  // Edit User Modal State
+  // Edit User Modal State (form fields isolated inside EditUserModal)
   const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editEmail, setEditEmail] = useState("");
-  const [editPhone, setEditPhone] = useState("");
-  const [editActorType, setEditActorType] = useState<"ADMIN" | "DIRECTOR" | "USER">("USER");
-  const [editDepartment, setEditDepartment] = useState("SALES");
-  const [editPosition, setEditPosition] = useState("Nhân viên");
-  const [editDecisionId, setEditDecisionId] = useState("");
-  const [editAddress, setEditAddress] = useState("");
-  const [editHometown, setEditHometown] = useState("");
-  const [editAchievements, setEditAchievements] = useState("");
-  const [editAvatar, setEditAvatar] = useState("");
-  const [editIsActive, setEditIsActive] = useState(true);
-  const [editNewPassword, setEditNewPassword] = useState("");
-  const [isUpdatingUser, setIsUpdatingUser] = useState(false);
-  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
 
   const showToastMsg = (msg: string) => {
     setToast(msg);
@@ -326,110 +693,18 @@ export function AdminUsersView() {
     }
   };
 
-  const openEditModal = (u: UserRecord) => {
+  const openEditModal = useCallback((u: UserRecord) => {
     setEditingUser(u);
-    setEditName(u.name || "");
-    setEditEmail(u.email || "");
-    setEditPhone(u.phone || "");
-    const resolvedActor =
-      u.actorType || (u.role === "ADMIN" ? "ADMIN" : u.role === "DIRECTOR" ? "DIRECTOR" : "USER");
-    setEditActorType(resolvedActor);
-    setEditDepartment(u.department || (resolvedActor === "USER" ? u.role : "SALES"));
-    setEditPosition(
-      u.position ||
-        (resolvedActor === "ADMIN"
-          ? "Quản trị hệ thống"
-          : resolvedActor === "DIRECTOR"
-            ? "Giám đốc"
-            : "Nhân viên")
-    );
-    setEditDecisionId("");
-    setEditAddress(u.address || "");
-    setEditHometown(u.hometown || "");
-    setEditAchievements(u.achievements || "");
-    setEditAvatar(u.avatar || "");
-    setEditIsActive(u.isActive !== false);
-    setEditNewPassword("");
-    setEditError(null);
-  };
+  }, []);
 
-  const handleEditAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      setIsUploadingAvatar(true);
-      const formData = new FormData();
-      formData.set("file", file);
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Lỗi tải ảnh");
-      }
-      setEditAvatar(json.data.fileUrl);
-    } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Không tải được ảnh đại diện");
-    } finally {
-      setIsUploadingAvatar(false);
-    }
-  };
+  const handleCloseEditModal = useCallback(() => {
+    setEditingUser(null);
+  }, []);
 
-  const handleSaveEditUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingUser) return;
-    setIsUpdatingUser(true);
-    setEditError(null);
-
-    try {
-      const effectiveDept =
-        editActorType === "ADMIN"
-          ? "ADMIN_SYS"
-          : editActorType === "DIRECTOR"
-            ? "BOARD"
-            : editDepartment;
-      const effectivePos =
-        editActorType === "ADMIN"
-          ? "Quản trị hệ thống"
-          : editActorType === "DIRECTOR"
-            ? "Giám đốc"
-            : editPosition;
-
-      const res = await fetch(`/api/users/${editingUser.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: editName.trim(),
-          email: editEmail.trim(),
-          phone: editPhone.trim() || null,
-          actorType: editActorType,
-          department: effectiveDept,
-          position: effectivePos,
-          role: editActorType === "USER" ? effectiveDept : editActorType,
-          decisionId: editDecisionId || null,
-          address: editAddress.trim() || null,
-          hometown: editHometown.trim() || null,
-          achievements: editAchievements.trim() || null,
-          avatar: editAvatar.trim() || null,
-          isActive: editIsActive,
-          newPassword: editNewPassword.trim() || null,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Không thể cập nhật tài khoản");
-      }
-
-      showToastMsg(json.message || "Đã lưu thông tin tài khoản");
-      setEditingUser(null);
-      fetchAllData();
-    } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Lỗi cập nhật tài khoản");
-    } finally {
-      setIsUpdatingUser(false);
-    }
-  };
+  const handleSavedEditUser = useCallback((msg: string) => {
+    showToastMsg(msg);
+    fetchAllData();
+  }, []);
 
   const normalizeUserActor = (u: UserRecord): "ADMIN" | "DIRECTOR" | "USER" => {
     if (u.actorType) return u.actorType;
@@ -1147,240 +1422,14 @@ export function AdminUsersView() {
         </div>
       )}
 
-      {/* Edit User Modal */}
-      <Modal
-        open={Boolean(editingUser)}
-        onClose={() => setEditingUser(null)}
-        preventClose={isUpdatingUser}
-        size="lg"
-        title={editingUser ? `Phân quyền & Hồ sơ: ${editingUser.name}` : "Chỉnh sửa tài khoản"}
-        description="Cập nhật Tác nhân (ADMIN / GIÁM ĐỐC / USER), Phòng ban và Chức vụ (yêu cầu Quyết định của Giám đốc khi bổ nhiệm Trưởng phòng/Trưởng ban)"
-        icon={
-          editAvatar ? (
-            <img src={editAvatar} alt={editName} className="w-full h-full rounded-lg object-cover" />
-          ) : (
-            <span className="text-xs font-semibold">{editingUser?.initials}</span>
-          )
-        }
-        footer={
-          <div className="flex items-center justify-end gap-2.5">
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={isUpdatingUser}
-              onClick={() => setEditingUser(null)}
-            >
-              Hủy
-            </Button>
-            <Button
-              type="submit"
-              form="edit-user-form"
-              variant="primary"
-              isLoading={isUpdatingUser}
-              leftIcon={<Save className="w-4 h-4" />}
-            >
-              Lưu thay đổi
-            </Button>
-          </div>
-        }
-      >
-        {editingUser && (
-          <form id="edit-user-form" onSubmit={handleSaveEditUser} className="space-y-4">
-            {editError && (
-              <div className="p-3 bg-rose-50 text-rose-700 rounded-lg border border-rose-200 flex items-center gap-2 text-xs">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-                <span>{editError}</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="crm-label">
-                  Họ và tên <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="crm-input"
-                />
-              </div>
-
-              <div>
-                <label className="crm-label">
-                  Email đăng nhập <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  className="crm-input font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="crm-label">Tác nhân hệ thống (Actor)</label>
-                <select
-                  value={editActorType}
-                  onChange={(e) =>
-                    setEditActorType(e.target.value as "ADMIN" | "DIRECTOR" | "USER")
-                  }
-                  className="crm-select"
-                >
-                  <option value="USER">USER — Nhân sự thuộc các Phòng ban</option>
-                  <option value="DIRECTOR">GIÁM ĐỐC — Ban Giám Đốc</option>
-                  <option value="ADMIN">ADMIN — Quản trị hệ thống</option>
-                </select>
-              </div>
-
-              {editActorType === "USER" && (
-                <div>
-                  <label className="crm-label">Phòng ban (trong USER)</label>
-                  <select
-                    value={editDepartment}
-                    onChange={(e) => setEditDepartment(e.target.value)}
-                    className="crm-select"
-                  >
-                    {departments.map((d) => (
-                      <option key={d.code} value={d.code}>
-                        {d.name} ({d.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {editActorType === "USER" && (
-                <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
-                  <div>
-                    <label className="crm-label">Chức vụ trong Phòng ban</label>
-                    <select
-                      value={editPosition}
-                      onChange={(e) => setEditPosition(e.target.value)}
-                      className="crm-select"
-                    >
-                      <option value="Nhân viên">Nhân viên (Mặc định)</option>
-                      <option value="Trưởng nhóm">Trưởng nhóm (Cần QĐ Giám đốc)</option>
-                      <option value="Phó phòng">Phó phòng (Cần QĐ Giám đốc)</option>
-                      <option value="Trưởng ban">Trưởng ban (Cần QĐ Giám đốc)</option>
-                      <option value="Trưởng phòng">Trưởng phòng (Cần QĐ Giám đốc)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="crm-label">
-                      Căn cứ Quyết định Giám đốc ký (khi nâng chức)
-                    </label>
-                    <select
-                      value={editDecisionId}
-                      onChange={(e) => setEditDecisionId(e.target.value)}
-                      className="crm-select"
-                    >
-                      <option value="">
-                        {editingUser.appointedDecisionCode
-                          ? `Đang áp dụng: ${editingUser.appointedDecisionCode}`
-                          : "-- Chọn thông báo Giám đốc đã ký --"}
-                      </option>
-                      {decisions
-                        .filter((d) => d.targetUserId === editingUser.id)
-                        .map((d) => (
-                          <option key={d.id} value={d.id}>
-                            [{d.code}] Bổ nhiệm {d.newPosition} ({d.signedByName})
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="crm-label">Số điện thoại</label>
-                <input
-                  type="tel"
-                  value={editPhone}
-                  onChange={(e) => setEditPhone(e.target.value)}
-                  placeholder="0909 xxx xxx"
-                  className="crm-input"
-                />
-              </div>
-
-              <div>
-                <label className="crm-label">Địa chỉ cư trú</label>
-                <input
-                  type="text"
-                  value={editAddress}
-                  onChange={(e) => setEditAddress(e.target.value)}
-                  className="crm-input"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="crm-label">Ảnh đại diện (Avatar)</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={editAvatar}
-                  onChange={(e) => setEditAvatar(e.target.value)}
-                  placeholder="URL ảnh đại diện..."
-                  className="crm-input font-mono flex-1"
-                />
-                <label className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg bg-slate-100 hover:bg-slate-200/80 border border-slate-200 text-xs font-medium text-slate-700 cursor-pointer shrink-0">
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>{isUploadingAvatar ? "Đang tải..." : "Tải ảnh"}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleEditAvatarUpload}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
-              <div>
-                <label className="crm-label">Đặt lại mật khẩu mới (Tùy chọn)</label>
-                <input
-                  type="text"
-                  value={editNewPassword}
-                  onChange={(e) => setEditNewPassword(e.target.value)}
-                  placeholder="Bỏ trống nếu giữ nguyên mật khẩu..."
-                  className="crm-input font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="crm-label">Trạng thái truy cập</label>
-                <button
-                  type="button"
-                  onClick={() => setEditIsActive((prev) => !prev)}
-                  className={cn(
-                    "w-full h-9 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 border transition-colors cursor-pointer",
-                    editIsActive
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                      : "bg-rose-50 text-rose-700 border-rose-200"
-                  )}
-                >
-                  {editIsActive ? (
-                    <>
-                      <Unlock className="w-3.5 h-3.5" />
-                      <span>Đang hoạt động (Cho phép đăng nhập)</span>
-                    </>
-                  ) : (
-                    <>
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Tạm khóa / Chờ Admin duyệt</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </form>
-        )}
-      </Modal>
+      {/* Edit User Modal (State-Isolated Component) */}
+      <EditUserModal
+        editingUser={editingUser}
+        departments={departments}
+        decisions={decisions}
+        onClose={handleCloseEditModal}
+        onSaved={handleSavedEditUser}
+      />
     </div>
   );
 }

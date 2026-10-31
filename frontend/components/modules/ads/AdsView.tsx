@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Megaphone,
   TrendingUp,
@@ -77,6 +77,202 @@ function getCampaignStatusMeta(status: string): {
   return { label: status || "Hoàn thành", tone: "neutral" };
 }
 
+interface CreateCampaignModalProps {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (message: string) => void;
+}
+
+/**
+ * Isolated Campaign Form Modal: owns all input states locally so typing campaign name,
+ * code, or budget never triggers re-renders of the AdsView KPI cards or data tables.
+ */
+const CreateCampaignModal = React.memo(function CreateCampaignModal({
+  open,
+  onClose,
+  onCreated,
+}: CreateCampaignModalProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formName, setFormName] = useState("");
+  const [formCode, setFormCode] = useState("");
+  const [formPlatform, setFormPlatform] = useState("Google Ads");
+  const [formBudget, setFormBudget] = useState("20000000");
+  const [formSpent, setFormSpent] = useState("0");
+  const [formStatus, setFormStatus] = useState("Active");
+
+  useEffect(() => {
+    if (open) {
+      setFormError(null);
+    }
+  }, [open]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+    if (!formName.trim() || formName.trim().length < 3) {
+      setFormError("Vui lòng nhập tên chiến dịch tối thiểu 3 ký tự.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const res = await fetch("/api/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formName.trim(),
+          code: formCode.trim() || undefined,
+          platform: formPlatform,
+          budget: parseFloat(formBudget) || 0,
+          spent: parseFloat(formSpent) || 0,
+          status: formStatus,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error?.message || "Lỗi tạo chiến dịch");
+      }
+
+      setFormName("");
+      setFormCode("");
+      setFormBudget("20000000");
+      setFormSpent("0");
+      onCreated(json.message || "Tạo chiến dịch quảng cáo thành công");
+      onClose();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Không thể lưu chiến dịch");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      preventClose={isSubmitting}
+      title="Tạo chiến dịch quảng cáo mới"
+      icon={<Megaphone className="w-4 h-4" />}
+      description={
+        <span className="inline-flex items-center gap-1">
+          <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+          Phân quyền bộ phận ADS &amp; Ban Giám Đốc
+        </span>
+      }
+      footer={
+        <div className="flex items-center justify-end gap-2.5">
+          <Button type="button" variant="secondary" disabled={isSubmitting} onClick={onClose}>
+            Hủy
+          </Button>
+          <Button
+            type="submit"
+            form="create-campaign-form"
+            variant="primary"
+            isLoading={isSubmitting}
+          >
+            Lưu chiến dịch
+          </Button>
+        </div>
+      }
+    >
+      <form id="create-campaign-form" onSubmit={handleSubmit} className="space-y-4">
+        {formError && (
+          <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">
+            {formError}
+          </div>
+        )}
+
+        <div>
+          <label className="crm-label">
+            Tên chiến dịch <span className="text-rose-500">*</span>
+          </label>
+          <input
+            type="text"
+            required
+            data-autofocus
+            placeholder="VD: Chiến dịch Màn hình LED P2.5 Hội trường Q4"
+            value={formName}
+            onChange={(e) => setFormName(e.target.value)}
+            className="crm-input"
+          />
+        </div>
+
+        <div>
+          <label className="crm-label">Mã chiến dịch (Tùy chọn)</label>
+          <input
+            type="text"
+            placeholder="Để trống hệ thống tự sinh mã TT-ADS-..."
+            value={formCode}
+            onChange={(e) => setFormCode(e.target.value)}
+            className="crm-input"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="crm-label">Nền tảng quảng cáo</label>
+            <select
+              value={formPlatform}
+              onChange={(e) => setFormPlatform(e.target.value)}
+              className="crm-select"
+            >
+              <option value="Google Ads">Google Ads</option>
+              <option value="Facebook Ads">Facebook Ads</option>
+              <option value="TikTok Ads">TikTok Ads</option>
+              <option value="Zalo Ads">Zalo Ads</option>
+              <option value="SEO">SEO</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="crm-label">Trạng thái</label>
+            <select
+              value={formStatus}
+              onChange={(e) => setFormStatus(e.target.value)}
+              className="crm-select"
+            >
+              <option value="Active">Đang chạy (Active)</option>
+              <option value="Paused">Tạm dừng (Paused)</option>
+              <option value="Completed">Hoàn thành (Completed)</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="crm-label">
+              Ngân sách cấp (VNĐ) <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="number"
+              required
+              min={0}
+              step={500000}
+              value={formBudget}
+              onChange={(e) => setFormBudget(e.target.value)}
+              className="crm-input kpi-number"
+            />
+          </div>
+
+          <div>
+            <label className="crm-label">Đã giải ngân (VNĐ)</label>
+            <input
+              type="number"
+              min={0}
+              step={100000}
+              value={formSpent}
+              onChange={(e) => setFormSpent(e.target.value)}
+              className="crm-input kpi-number"
+            />
+          </div>
+        </div>
+      </form>
+    </Modal>
+  );
+});
+
 export function AdsView() {
   const [data, setData] = useState<AdsApiResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -93,21 +289,13 @@ export function AdsView() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
 
-  // Modal tạo chiến dịch mới dành riêng cho ADS & ADMIN
+  // Modal tạo chiến dịch mới dành riêng cho ADS & ADMIN (state form được tách riêng trong CreateCampaignModal)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [formName, setFormName] = useState("");
-  const [formCode, setFormCode] = useState("");
-  const [formPlatform, setFormPlatform] = useState("Google Ads");
-  const [formBudget, setFormBudget] = useState("20000000");
-  const [formSpent, setFormSpent] = useState("0");
-  const [formStatus, setFormStatus] = useState("Active");
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
-  };
+  }, []);
 
   const fetchAdsData = async () => {
     try {
@@ -249,48 +437,17 @@ export function AdsView() {
     setDateRange("all");
   };
 
-  // Xử lý tạo chiến dịch mới
-  const handleCreateCampaign = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError(null);
-    if (!formName.trim() || formName.trim().length < 3) {
-      setFormError("Vui lòng nhập tên chiến dịch tối thiểu 3 ký tự.");
-      return;
-    }
+  const handleCloseCreateModal = useCallback(() => {
+    setIsCreateModalOpen(false);
+  }, []);
 
-    try {
-      setIsSubmitting(true);
-      const res = await fetch("/api/campaigns", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formName.trim(),
-          code: formCode.trim() || undefined,
-          platform: formPlatform,
-          budget: parseFloat(formBudget) || 0,
-          spent: parseFloat(formSpent) || 0,
-          status: formStatus,
-        }),
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Lỗi tạo chiến dịch");
-      }
-
-      showToast(json.message || "Tạo chiến dịch quảng cáo thành công");
-      setIsCreateModalOpen(false);
-      setFormName("");
-      setFormCode("");
-      fetchAdsData();
-    } catch (err) {
-      setFormError(
-        err instanceof Error ? err.message : "Không thể lưu chiến dịch"
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  const handleCampaignCreated = useCallback(
+    (message: string) => {
+      showToast(message);
+      void fetchAdsData();
+    },
+    [showToast]
+  );
 
   if (isLoading && !hasLoaded) {
     return (
@@ -372,7 +529,6 @@ export function AdsView() {
                 size="md"
                 leftIcon={<Plus className="w-4 h-4" />}
                 onClick={() => {
-                  setFormError(null);
                   setIsCreateModalOpen(true);
                 }}
               >
@@ -798,127 +954,12 @@ export function AdsView() {
         )}
       </div>
 
-      {/* Create Campaign Modal */}
-      <Modal
+      {/* Create Campaign Modal (isolated state — typing never re-renders AdsView) */}
+      <CreateCampaignModal
         open={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        preventClose={isSubmitting}
-        title="Tạo chiến dịch quảng cáo mới"
-        icon={<Megaphone className="w-4 h-4" />}
-        description={
-          <span className="inline-flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-            Phân quyền bộ phận ADS &amp; Ban Giám Đốc
-          </span>
-        }
-        footer={
-          <div className="flex items-center justify-end gap-2.5">
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={isSubmitting}
-              onClick={() => setIsCreateModalOpen(false)}
-            >
-              Hủy
-            </Button>
-            <Button type="submit" form="create-campaign-form" variant="primary" isLoading={isSubmitting}>
-              Lưu chiến dịch
-            </Button>
-          </div>
-        }
-      >
-            <form id="create-campaign-form" onSubmit={handleCreateCampaign} className="space-y-4">
-              {formError && (
-                <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">
-                  {formError}
-                </div>
-              )}
-
-              <div>
-                <label className="crm-label">
-                  Tên chiến dịch <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="VD: Chiến dịch Màn hình LED P2.5 Hội trường Q4"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  className="crm-input"
-                />
-              </div>
-
-              <div>
-                <label className="crm-label">Mã chiến dịch (Tùy chọn)</label>
-                <input
-                  type="text"
-                  placeholder="Để trống hệ thống tự sinh mã TT-ADS-..."
-                  value={formCode}
-                  onChange={(e) => setFormCode(e.target.value)}
-                  className="crm-input"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="crm-label">Nền tảng quảng cáo</label>
-                  <select
-                    value={formPlatform}
-                    onChange={(e) => setFormPlatform(e.target.value)}
-                    className="crm-select"
-                  >
-                    <option value="Google Ads">Google Ads</option>
-                    <option value="Facebook Ads">Facebook Ads</option>
-                    <option value="TikTok Ads">TikTok Ads</option>
-                    <option value="Zalo Ads">Zalo Ads</option>
-                    <option value="SEO">SEO</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="crm-label">Trạng thái</label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value)}
-                    className="crm-select"
-                  >
-                    <option value="Active">Đang chạy (Active)</option>
-                    <option value="Paused">Tạm dừng (Paused)</option>
-                    <option value="Completed">Hoàn thành (Completed)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="crm-label">
-                    Ngân sách cấp (VNĐ) <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    step={500000}
-                    value={formBudget}
-                    onChange={(e) => setFormBudget(e.target.value)}
-                    className="crm-input kpi-number"
-                  />
-                </div>
-
-                <div>
-                  <label className="crm-label">Đã giải ngân (VNĐ)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={100000}
-                    value={formSpent}
-                    onChange={(e) => setFormSpent(e.target.value)}
-                    className="crm-input kpi-number"
-                  />
-                </div>
-              </div>
-            </form>
-      </Modal>
+        onClose={handleCloseCreateModal}
+        onCreated={handleCampaignCreated}
+      />
     </div>
   );
 }

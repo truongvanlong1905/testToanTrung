@@ -164,46 +164,50 @@ async function main() {
     });
   }
 
-  // 1c. Seed Thông báo chúc mừng / Quyết định bổ nhiệm mẫu của Giám đốc ký
-  await prisma.promotionDecision.upsert({
-    where: { code: "QD-BGD-2610-001" },
-    update: {},
-    create: {
-      code: "QD-BGD-2610-001",
-      title: "Thông báo chúc mừng bổ nhiệm Trưởng Phòng Kinh Doanh LED",
-      content:
-        "Ban Giám Đốc Công ty Toàn Trung trân trọng chúc mừng nhân sự Trần Minh Tuấn chính thức được bổ nhiệm giữ chức vụ Trưởng phòng tại Phòng Kinh Doanh (SALES) nhờ thành tích xuất sắc trong công tác phát triển dự án màn hình LED hội trường & tòa nhà.",
-      targetUserId: "usr_sales_01",
-      targetDepartment: "SALES",
-      newPosition: "Trưởng phòng",
-      signedById: "usr_director_01",
-      signedByName: "Nguyễn Toàn Trung (Giám Đốc)",
-      status: "APPLIED_BY_ADMIN",
-      appliedByAdminId: "usr_admin_01",
-      appliedAt: new Date(),
-    },
-  });
+  const seedDemoData = process.env.SEED_DEMO_DATA === "true";
 
-  await prisma.promotionDecision.upsert({
-    where: { code: "QD-BGD-2610-002" },
-    update: {},
-    create: {
-      code: "QD-BGD-2610-002",
-      title: "Thông báo chúc mừng bổ nhiệm Trưởng Ban Marketing & Truyền Thông",
-      content:
-        "Ban Giám Đốc Công ty Toàn Trung chúc mừng nhân sự Lê Thu Hà được bổ nhiệm giữ chức vụ Trưởng ban tại Phòng Marketing (MARKETING).",
-      targetUserId: "usr_mkt_01",
-      targetDepartment: "MARKETING",
-      newPosition: "Trưởng ban",
-      signedById: "usr_director_01",
-      signedByName: "Nguyễn Toàn Trung (Giám Đốc)",
-      status: "APPLIED_BY_ADMIN",
-      appliedByAdminId: "usr_admin_01",
-      appliedAt: new Date(),
-    },
-  });
+  // 1c. Chỉ tạo dữ liệu mẫu (Quyết định, Chiến dịch, Từ khóa, Tracking, Lead mẫu) khi bật SEED_DEMO_DATA=true
+  if (seedDemoData) {
+    await prisma.promotionDecision.upsert({
+      where: { code: "QD-BGD-2610-001" },
+      update: {},
+      create: {
+        code: "QD-BGD-2610-001",
+        title: "Thông báo chúc mừng bổ nhiệm Trưởng Phòng Kinh Doanh LED",
+        content:
+          "Ban Giám Đốc Công ty Toàn Trung trân trọng chúc mừng nhân sự Trần Minh Tuấn chính thức được bổ nhiệm giữ chức vụ Trưởng phòng tại Phòng Kinh Doanh (SALES) nhờ thành tích xuất sắc trong công tác phát triển dự án màn hình LED hội trường & tòa nhà.",
+        targetUserId: "usr_sales_01",
+        targetDepartment: "SALES",
+        newPosition: "Trưởng phòng",
+        signedById: "usr_director_01",
+        signedByName: "Nguyễn Toàn Trung (Giám Đốc)",
+        status: "APPLIED_BY_ADMIN",
+        appliedByAdminId: "usr_admin_01",
+        appliedAt: new Date(),
+      },
+    });
 
-  console.log("✅ Đã cập nhật mô hình 3 Tác nhân (ADMIN - DIRECTOR - USER), Phòng ban & Quyết định bổ nhiệm");
+    await prisma.promotionDecision.upsert({
+      where: { code: "QD-BGD-2610-002" },
+      update: {},
+      create: {
+        code: "QD-BGD-2610-002",
+        title: "Thông báo chúc mừng bổ nhiệm Trưởng Ban Marketing & Truyền Thông",
+        content:
+          "Ban Giám Đốc Công ty Toàn Trung chúc mừng nhân sự Lê Thu Hà được bổ nhiệm giữ chức vụ Trưởng ban tại Phòng Marketing (MARKETING).",
+        targetUserId: "usr_mkt_01",
+        targetDepartment: "MARKETING",
+        newPosition: "Trưởng ban",
+        signedById: "usr_director_01",
+        signedByName: "Nguyễn Toàn Trung (Giám Đốc)",
+        status: "APPLIED_BY_ADMIN",
+        appliedByAdminId: "usr_admin_01",
+        appliedAt: new Date(),
+      },
+    });
+  }
+
+  console.log("✅ Đã cập nhật mô hình 3 Tác nhân (ADMIN - DIRECTOR - USER) & Phòng ban");
 
   // 2. Seed Categories
   const categoriesData = [
@@ -247,156 +251,138 @@ async function main() {
     });
   }
 
-  // 3. Seed Marketing Campaigns
-  const campaigns = [
-    {
-      id: "cmp_01",
-      code: "CMP_GG_INDOOR_26",
-      name: "Google Ads - Màn hình LED P2.5 Hội trường & Phòng họp",
-      platform: "Google Ads",
-      status: "Active",
-      budget: 25000000,
-      spent: 18450000,
-    },
-    {
-      id: "cmp_02",
-      code: "CMP_GG_OUTDOOR_26",
-      name: "Google Ads - Màn hình LED P3/P4 Ngoài trời Quảng cáo",
-      platform: "Google Ads",
-      status: "Active",
-      budget: 30000000,
-      spent: 24200000,
-    },
-    {
-      id: "cmp_03",
-      code: "CMP_FB_EVENT_26",
-      name: "Facebook Ads - Giải pháp hiển thị Trung tâm Hội nghị & Tiệc cưới",
-      platform: "Facebook Ads",
-      status: "Active",
-      budget: 15000000,
-      spent: 9800000,
-    },
-    {
-      id: "cmp_04",
-      code: "CMP_SEO_BOARD_26",
-      name: "SEO Tổng lực - Bảng điện tử ma trận & Tỷ giá Ngân hàng",
-      platform: "SEO",
-      status: "Active",
-      budget: 10000000,
-      spent: 8500000,
-    },
-  ];
+  if (seedDemoData) {
+    // 3. Seed Marketing Campaigns (chỉ khi SEED_DEMO_DATA=true)
+    const campaigns = [
+      {
+        id: "cmp_01",
+        code: "CMP_GG_INDOOR_26",
+        name: "Google Ads - Màn hình LED P2.5 Hội trường & Phòng họp",
+        platform: "Google Ads",
+        status: "Active",
+        budget: 25000000,
+        spent: 18450000,
+      },
+      {
+        id: "cmp_02",
+        code: "CMP_GG_OUTDOOR_26",
+        name: "Google Ads - Màn hình LED P3/P4 Ngoài trời Quảng cáo",
+        platform: "Google Ads",
+        status: "Active",
+        budget: 30000000,
+        spent: 24200000,
+      },
+      {
+        id: "cmp_03",
+        code: "CMP_FB_EVENT_26",
+        name: "Facebook Ads - Giải pháp hiển thị Trung tâm Hội nghị & Tiệc cưới",
+        platform: "Facebook Ads",
+        status: "Active",
+        budget: 15000000,
+        spent: 9800000,
+      },
+      {
+        id: "cmp_04",
+        code: "CMP_SEO_BOARD_26",
+        name: "SEO Tổng lực - Bảng điện tử ma trận & Tỷ giá Ngân hàng",
+        platform: "SEO",
+        status: "Active",
+        budget: 10000000,
+        spent: 8500000,
+      },
+    ];
 
-  for (const cmp of campaigns) {
-    await prisma.marketingCampaign.upsert({
-      where: { code: cmp.code },
-      update: cmp,
-      create: cmp,
-    });
-  }
-
-  // 4. Seed Keywords
-  const keywords = [
-    {
-      keyword: "màn hình led p2.5 trong nhà",
-      impressions: 14200,
-      clicks: 1280,
-      avgCpc: 12400,
-      avgPosition: 1.4,
-      searchVolume: 8800,
-      source: "Google Ads",
-    },
-    {
-      keyword: "báo giá màn hình led ngoài trời p3",
-      impressions: 19500,
-      clicks: 1650,
-      avgCpc: 15800,
-      avgPosition: 1.2,
-      searchVolume: 12400,
-      source: "Google Ads",
-    },
-    {
-      keyword: "bảng điện tử led ma trận 3 màu",
-      impressions: 8900,
-      clicks: 720,
-      avgCpc: 8900,
-      avgPosition: 2.1,
-      searchVolume: 5600,
-      source: "Google Ads",
-    },
-    {
-      keyword: "màn hình led cong phòng họp vip",
-      impressions: 6400,
-      clicks: 580,
-      avgCpc: 18200,
-      avgPosition: 1.8,
-      searchVolume: 3200,
-      source: "Google Search Console",
-    },
-    {
-      keyword: "toàn trung telecom màn hình led",
-      impressions: 5200,
-      clicks: 940,
-      avgCpc: 4500,
-      avgPosition: 1.0,
-      searchVolume: 2400,
-      source: "Google Search Console",
-    },
-  ];
-
-  if ((await prisma.keywordMetric.count()) === 0) {
-    for (const kw of keywords) {
-      await prisma.keywordMetric.create({ data: kw });
+    for (const cmp of campaigns) {
+      await prisma.marketingCampaign.upsert({
+        where: { code: cmp.code },
+        update: cmp,
+        create: cmp,
+      });
     }
-  }
 
-  // 5. Seed Tracking Events
-  const trackingData = [
-    {
-      websiteSource: "toantrungtelecom.com",
-      source: "google",
-      medium: "cpc",
-      campaign: "LED_Indoor_Hall_P2.5",
-      landingPage: "/du-an/man-hinh-led-p2.5-hoi-truong",
-      device: "Desktop",
-      ipAddress: "14.232.180.45",
-      location: "TP. Hồ Chí Minh",
-    },
-    {
-      websiteSource: "ledtoantrung.vn",
-      source: "facebook",
-      medium: "cpc",
-      campaign: "LED_Outdoor_P4_Building",
-      landingPage: "/san-pham/led-ngoai-troi-p4",
-      device: "Mobile",
-      ipAddress: "113.161.74.88",
-      location: "Hà Nội",
-    },
-    {
-      websiteSource: "toantrungtelecom.com",
-      source: "google",
-      medium: "organic",
-      campaign: "SEO_Bang_Dien_Tu",
-      landingPage: "/bang-dien-tu-ngan-hang",
-      device: "Desktop",
-      ipAddress: "27.72.60.12",
-      location: "Đà Nẵng",
-    },
-    {
-      websiteSource: "toantrungtelecom.com",
-      source: "direct",
-      medium: "none",
-      campaign: "Trực tiếp",
-      landingPage: "/lien-he-bao-gia",
-      device: "Mobile",
-      ipAddress: "171.244.12.90",
-      location: "Bình Dương",
-    },
-  ];
+    // 4. Seed Keywords
+    const keywords = [
+      {
+        keyword: "màn hình led p2.5 trong nhà",
+        impressions: 14200,
+        clicks: 1280,
+        avgCpc: 12400,
+        avgPosition: 1.4,
+        searchVolume: 8800,
+        source: "Google Ads",
+      },
+      {
+        keyword: "báo giá màn hình led ngoài trời p3",
+        impressions: 19500,
+        clicks: 1650,
+        avgCpc: 15800,
+        avgPosition: 1.2,
+        searchVolume: 12400,
+        source: "Google Ads",
+      },
+      {
+        keyword: "bảng điện tử led ma trận 3 màu",
+        impressions: 8900,
+        clicks: 720,
+        avgCpc: 8900,
+        avgPosition: 2.1,
+        searchVolume: 5600,
+        source: "Google Ads",
+      },
+      {
+        keyword: "màn hình led cong phòng họp vip",
+        impressions: 6400,
+        clicks: 580,
+        avgCpc: 18200,
+        avgPosition: 1.8,
+        searchVolume: 3200,
+        source: "Google Search Console",
+      },
+      {
+        keyword: "toàn trung telecom màn hình led",
+        impressions: 5200,
+        clicks: 940,
+        avgCpc: 4500,
+        avgPosition: 1.0,
+        searchVolume: 2400,
+        source: "Google Search Console",
+      },
+    ];
 
-  if ((await prisma.trackingEvent.count()) === 0) {
-    for (const tr of trackingData) {
-      await prisma.trackingEvent.create({ data: tr });
+    if ((await prisma.keywordMetric.count()) === 0) {
+      for (const kw of keywords) {
+        await prisma.keywordMetric.create({ data: kw });
+      }
+    }
+
+    // 5. Seed Tracking Events
+    const trackingData = [
+      {
+        websiteSource: "toantrungtelecom.com",
+        source: "google",
+        medium: "cpc",
+        campaign: "LED_Indoor_Hall_P2.5",
+        landingPage: "/du-an/man-hinh-led-p2.5-hoi-truong",
+        device: "Desktop",
+        ipAddress: "14.232.180.45",
+        location: "TP. Hồ Chí Minh",
+      },
+      {
+        websiteSource: "ledtoantrung.vn",
+        source: "facebook",
+        medium: "cpc",
+        campaign: "LED_Outdoor_P4_Building",
+        landingPage: "/san-pham/led-ngoai-troi-p4",
+        device: "Mobile",
+        ipAddress: "113.161.74.88",
+        location: "Hà Nội",
+      },
+    ];
+
+    if ((await prisma.trackingEvent.count()) === 0) {
+      for (const tr of trackingData) {
+        await prisma.trackingEvent.create({ data: tr });
+      }
     }
   }
 
@@ -446,124 +432,114 @@ async function main() {
     },
   });
 
-  // 8. Seed Initial Leads (nếu DB chưa có Lead nào)
-  if ((await prisma.lead.count()) === 0) {
-    const initialLeads = [
-      {
-        code: "TT-LED-2610-0001",
-        customerName: "Nguyễn Hoàng Bách",
-        companyName: "Tập đoàn Xây dựng Hòa Bình",
-        phone: "0908123888",
-        email: "bach.nh@hoabinhcorp.vn",
-        installationAddress: "235 Võ Thị Sáu, Quận 3, TP.HCM",
-        location: "TP. Hồ Chí Minh",
-        product: "Màn hình LED P1.86 Phòng họp Hội đồng Quản trị",
-        categoryId: "cat_led_indoor",
-        source: "Website",
-        status: "Đang soạn báo giá",
-        failureReason: null,
-        estimatedValue: "294.120.000 đ",
-        notes: "Yêu cầu tần số quét 3840Hz, thi công ngoài giờ hành chính cuối tuần.",
-        salesPersonId: "usr_sales_01",
-        createdById: "usr_admin_01",
-        priorityScore: 88,
-        priorityTier: "HOT",
-        ledWidth: 4.8,
-        ledHeight: 2.5,
-        ledModuleType: "LED P1.86 Indoor Phòng họp VIP (Cabinet nhôm đúc)",
-        discountPercent: 10,
-        directorApprovalStatus: "PENDING",
-        nextFollowUpAt: new Date(Date.now() + 3 * 3600 * 1000),
-        nextActionNote: "Chờ Giám đốc duyệt chiết khấu 10% để gửi bản PDF chốt hợp đồng",
-      },
-      {
-        code: "TT-LED-2610-0002",
-        customerName: "Trần Thanh Tùng",
-        companyName: "Trung tâm Hội nghị White Palace",
-        phone: "0913889977",
-        email: "tung.tt@whitepalace.com.vn",
-        installationAddress: "194 Hoàng Văn Thụ, Phú Nhuận, TP.HCM",
-        location: "TP. Hồ Chí Minh",
-        product: "Màn hình LED P2.5 Hội trường Sảnh Đại Yến",
-        categoryId: "cat_led_indoor",
-        source: "Hotline",
-        status: "Đã gửi báo giá",
-        failureReason: null,
-        estimatedValue: "182.500.000 đ",
-        notes: "Khách đã chốt mặt bằng, cần tiến độ bàn giao trong 7 ngày.",
-        salesPersonId: "usr_sales_02",
-        createdById: "usr_admin_01",
-        priorityScore: 82,
-        priorityTier: "HOT",
-        ledWidth: 4.0,
-        ledHeight: 2.5,
-        ledModuleType: "LED P2.5 Indoor Hội trường & Tiệc cưới",
-        discountPercent: 0,
-        directorApprovalStatus: "NONE",
-        nextFollowUpAt: new Date(Date.now() + 18 * 3600 * 1000),
-        nextActionNote: "Gọi xác nhận lịch ký hợp đồng & tạm ứng đợt 1 (50%)",
-      },
-    ];
-    for (const lead of initialLeads) {
-      await prisma.lead.create({ data: lead });
-    }
-  }
-
-  // 9. Seed Báo giá LED m² & Nhật ký CSKH doanh nghiệp mẫu (nếu chưa có bản báo giá nào)
-  if ((await prisma.leadQuote.count()) === 0) {
-    const firstLead = await prisma.lead.findFirst({ orderBy: { createdAt: "asc" } });
-    if (firstLead) {
-      await prisma.leadQuote.create({
-        data: {
-          code: "BG-TT-2610-001",
-          leadId: firstLead.id,
-          moduleSpec: "LED P1.86 Indoor Phòng họp VIP (Cabinet nhôm đúc)",
-          widthMeters: 4.8,
-          heightMeters: 2.5,
-          areaSqm: 12.0,
-          unitPriceVnd: 24000000,
-          processorVnd: 16500000,
-          structureInstallVnd: 22300000,
-          discountPercent: 10,
-          totalVnd: 294120000,
-          warrantyMonths: 36,
-          notes: "Bao gồm hệ khung nhôm định hình CNC siêu mỏng & Bộ xử lý Novastar VX600.",
-          status: "PENDING_DIRECTOR",
-          createdById: "usr_sales_01",
-        },
-      });
-
-      await prisma.leadActivity.create({
-        data: {
-          leadId: firstLead.id,
-          type: "SURVEY",
-          summary:
-            "Đã khảo sát thực tế mặt bằng phòng họp VIP: vách bê tông chịu lực tốt, kích thước chuẩn 4.8m × 2.5m (12m²), tủ điện 3 pha cách 8m.",
-          outcome: "Khách đề nghị mức chiết khấu dự án 10% — Đã lập báo giá trình Giám đốc phê duyệt.",
-          nextFollowUpAt: new Date(Date.now() + 4 * 3600 * 1000),
-          createdById: "usr_sales_01",
-        },
-      });
-
-      await prisma.lead.update({
-        where: { id: firstLead.id },
-        data: {
+  if (seedDemoData) {
+    // 8. Seed Initial Leads (chỉ khi SEED_DEMO_DATA=true và DB chưa có Lead nào)
+    if ((await prisma.lead.count()) === 0) {
+      const initialLeads = [
+        {
+          code: "TT-LED-2610-0001",
+          customerName: "Nguyễn Hoàng Bách",
+          companyName: "Tập đoàn Xây dựng Hòa Bình",
+          phone: "0908123888",
+          email: "bach.nh@hoabinhcorp.vn",
+          installationAddress: "235 Võ Thị Sáu, Quận 3, TP.HCM",
+          location: "TP. Hồ Chí Minh",
+          product: "Màn hình LED P1.86 Phòng họp Hội đồng Quản trị",
+          categoryId: "cat_led_indoor",
+          source: "Website",
+          status: "Đang soạn báo giá",
+          failureReason: null,
+          estimatedValue: "294.120.000 đ",
+          notes: "Yêu cầu tần số quét 3840Hz, thi công ngoài giờ hành chính cuối tuần.",
+          salesPersonId: "usr_sales_01",
+          createdById: "usr_admin_01",
+          priorityScore: 88,
+          priorityTier: "HOT",
           ledWidth: 4.8,
           ledHeight: 2.5,
           ledModuleType: "LED P1.86 Indoor Phòng họp VIP (Cabinet nhôm đúc)",
           discountPercent: 10,
-          estimatedValue: "294.120.000 đ",
           directorApprovalStatus: "PENDING",
-          priorityScore: 88,
-          priorityTier: "HOT",
-          nextFollowUpAt: new Date(Date.now() + 4 * 3600 * 1000),
-          nextActionNote: "Trình Giám đốc duyệt báo giá BG-TT-2610-001 (CK 10%)",
+          nextFollowUpAt: new Date(Date.now() + 3 * 3600 * 1000),
+          nextActionNote: "Chờ Giám đốc duyệt chiết khấu 10% để gửi bản PDF chốt hợp đồng",
         },
-      });
+        {
+          code: "TT-LED-2610-0002",
+          customerName: "Trần Thanh Tùng",
+          companyName: "Trung tâm Hội nghị White Palace",
+          phone: "0913889977",
+          email: "tung.tt@whitepalace.com.vn",
+          installationAddress: "194 Hoàng Văn Thụ, Phú Nhuận, TP.HCM",
+          location: "TP. Hồ Chí Minh",
+          product: "Màn hình LED P2.5 Hội trường Sảnh Đại Yến",
+          categoryId: "cat_led_indoor",
+          source: "Hotline",
+          status: "Đã gửi báo giá",
+          failureReason: null,
+          estimatedValue: "182.500.000 đ",
+          notes: "Khách đã chốt mặt bằng, cần tiến độ bàn giao trong 7 ngày.",
+          salesPersonId: "usr_sales_02",
+          createdById: "usr_admin_01",
+          priorityScore: 82,
+          priorityTier: "HOT",
+          ledWidth: 4.0,
+          ledHeight: 2.5,
+          ledModuleType: "LED P2.5 Indoor Hội trường & Tiệc cưới",
+          discountPercent: 0,
+          directorApprovalStatus: "NONE",
+          nextFollowUpAt: new Date(Date.now() + 18 * 3600 * 1000),
+          nextActionNote: "Gọi xác nhận lịch ký hợp đồng & tạm ứng đợt 1 (50%)",
+        },
+      ];
+      for (const lead of initialLeads) {
+        await prisma.lead.create({ data: lead });
+      }
+    }
+
+    // 9. Seed Báo giá LED m² & Nhật ký CSKH doanh nghiệp mẫu (chỉ khi SEED_DEMO_DATA=true)
+    if ((await prisma.leadQuote.count()) === 0) {
+      const firstLead = await prisma.lead.findFirst({ orderBy: { createdAt: "asc" } });
+      if (firstLead) {
+        await prisma.leadQuote.create({
+          data: {
+            code: "BG-TT-2610-001",
+            leadId: firstLead.id,
+            moduleSpec: "LED P1.86 Indoor Phòng họp VIP (Cabinet nhôm đúc)",
+            widthMeters: 4.8,
+            heightMeters: 2.5,
+            areaSqm: 12.0,
+            unitPriceVnd: 24000000,
+            processorVnd: 16500000,
+            structureInstallVnd: 22300000,
+            discountPercent: 10,
+            totalVnd: 294120000,
+            warrantyMonths: 36,
+            notes: "Bao gồm hệ khung nhôm định hình CNC siêu mỏng & Bộ xử lý Novastar VX600.",
+            status: "PENDING_DIRECTOR",
+            createdById: "usr_sales_01",
+          },
+        });
+
+        await prisma.leadActivity.create({
+          data: {
+            leadId: firstLead.id,
+            type: "SURVEY",
+            summary:
+              "Đã khảo sát thực tế mặt bằng phòng họp VIP: vách bê tông chịu lực tốt, kích thước chuẩn 4.8m × 2.5m (12m²), tủ điện 3 pha cách 8m.",
+            outcome: "Khách đề nghị mức chiết khấu dự án 10% — Đã lập báo giá trình Giám đốc phê duyệt.",
+            nextFollowUpAt: new Date(Date.now() + 4 * 3600 * 1000),
+            createdById: "usr_sales_01",
+          },
+        });
+      }
     }
   }
 
-  console.log("🚀 Seed data toàn diện (Users, Campaigns, Keywords, Tracking, Brand, Leads, Quotes) thành công!");
+  console.log(
+    seedDemoData
+      ? "🚀 Seed data kèm dữ liệu mẫu (SEED_DEMO_DATA=true) thành công!"
+      : "🚀 Đã khởi tạo tài khoản nền tảng, phòng ban & danh mục sản phẩm (không tạo dữ liệu kinh doanh giả lập)!"
+  );
 }
 
 main()

@@ -6,6 +6,7 @@ import {
   getCurrentUser,
   resolveActorAndDept,
   isManagerialPosition,
+  invalidateUserSessionCache,
   unauthorizedResponse,
   forbiddenResponse,
 } from "@/lib/auth";
@@ -215,6 +216,8 @@ async function handleAdminUpdateUser(
         }),
       },
     });
+
+    invalidateUserSessionCache(updatedUser.id);
 
     return NextResponse.json({
       success: true,

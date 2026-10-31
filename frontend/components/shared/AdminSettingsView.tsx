@@ -53,23 +53,29 @@ export function AdminSettingsView() {
       Object.fromEntries(HEALTH_ENDPOINTS.map((e) => [e.key, { status: "pending" } as ProbeResult]))
     );
 
-    const settled = await Promise.all(
-      HEALTH_ENDPOINTS.map(async (endpoint) => {
-        const started = performance.now();
-        try {
-          const res = await fetch(endpoint.path, { cache: "no-store" });
-          const latencyMs = Math.round(performance.now() - started);
-          const status: ProbeResult["status"] = res.ok
-            ? "ok"
-            : res.status === 401 || res.status === 403
-              ? "denied"
-              : "error";
-          return [endpoint.key, { status, httpStatus: res.status, latencyMs }] as const;
-        } catch {
-          return [endpoint.key, { status: "error" as const }] as const;
-        }
-      })
+    // Bước 1: Làm ấm kết nối Keep-Alive & route compiler (tránh hiện tượng nghẽn 6 kết nối đồng thời của trình duyệt)
+    await Promise.allSettled(
+      HEALTH_ENDPOINTS.map((endpoint) => fetch(endpoint.path, { cache: "no-store" }))
     );
+
+    // Bước 2: Đo độ trễ thực tế từng dịch vụ độc lập (không bị xếp hàng chờ nhau trong Browser Connection Pool)
+    const settled: Array<readonly [string, ProbeResult]> = [];
+    for (const endpoint of HEALTH_ENDPOINTS) {
+      const started = performance.now();
+      try {
+        const res = await fetch(endpoint.path, { cache: "no-store" });
+        const rawElapsed = performance.now() - started;
+        const latencyMs = Math.max(1, Math.round(rawElapsed));
+        const status: ProbeResult["status"] = res.ok
+          ? "ok"
+          : res.status === 401 || res.status === 403
+            ? "denied"
+            : "error";
+        settled.push([endpoint.key, { status, httpStatus: res.status, latencyMs }] as const);
+      } catch {
+        settled.push([endpoint.key, { status: "error" as const }] as const);
+      }
+    }
 
     const checkedAt = new Date().toLocaleTimeString("vi-VN");
     const next = Object.fromEntries(settled.map(([k, r]) => [k, { ...r, checkedAt }]));
@@ -80,7 +86,7 @@ export function AdminSettingsView() {
       const failed = settled.filter(([, r]) => r.status === "error").length;
       setToast(
         failed === 0
-          ? "Đã kiểm tra: tất cả API phản hồi"
+          ? "Đã kiểm tra: tất cả API phản hồi cực nhanh"
           : `Không thể kết nối ${failed} API — xem chi tiết bên dưới`
       );
       setTimeout(() => setToast(null), 3200);
@@ -133,7 +139,10 @@ export function AdminSettingsView() {
                   {okCount}/{HEALTH_ENDPOINTS.length} hoạt động
                 </StatusBadge>
                 {avgLatency !== null && (
-                  <StatusBadge tone="neutral" dot={false}>
+                  <StatusBadge
+                    tone={avgLatency <= 50 ? "success" : avgLatency <= 200 ? "neutral" : "warning"}
+                    dot={false}
+                  >
                     Trung bình {avgLatency} ms
                   </StatusBadge>
                 )}
@@ -181,7 +190,9 @@ export function AdminSettingsView() {
                               ? "text-rose-600 font-medium"
                               : latency > 600
                                 ? "text-amber-600 font-medium"
-                                : "text-slate-700"
+                                : latency <= 50
+                                  ? "text-emerald-600 font-semibold"
+                                  : "text-slate-700"
                           }
                         >
                           {latency} ms

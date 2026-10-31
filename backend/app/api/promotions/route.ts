@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
+import {
+  getCurrentUser,
+  invalidateUserSessionCache,
+  unauthorizedResponse,
+  forbiddenResponse,
+} from "@/lib/auth";
+import { extractMaxCodeSuffix } from "@/lib/lead-scoring";
 
 export const dynamic = "force-dynamic";
 
@@ -75,8 +81,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     if (body?.action === "SIGN_NOTICE") {
-      // Chỉ Giám đốc (DIRECTOR) hoặc ADMIN đại diện Ban Giám Đốc mới được ký ban hành thông báo chúc mừng bổ nhiệm
-      if (user.actorType !== "DIRECTOR" && user.actorType !== "ADMIN" && user.role !== "DIRECTOR" && user.role !== "ADMIN") {
+      if (
+        user.actorType !== "DIRECTOR" &&
+        user.actorType !== "ADMIN" &&
+        user.role !== "DIRECTOR" &&
+        user.role !== "ADMIN"
+      ) {
         return forbiddenResponse("Chỉ Tác nhân GIÁM ĐỐC mới có thẩm quyền ký ban hành Thông báo chúc mừng bổ nhiệm");
       }
 
@@ -105,8 +115,11 @@ export async function POST(req: NextRequest) {
 
       const now = new Date();
       const ym = `${String(now.getFullYear()).slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}`;
-      const count = await prisma.promotionDecision.count();
-      const code = `QD-BGD-${ym}-${String(count + 1).padStart(3, "0")}`;
+      const existingDecisions = await prisma.promotionDecision.findMany({
+        select: { code: true },
+      });
+      const maxSeq = extractMaxCodeSuffix(existingDecisions, existingDecisions.length);
+      const code = `QD-BGD-${ym}-${String(maxSeq + 1).padStart(3, "0")}`;
 
       const decision = await prisma.promotionDecision.create({
         data: {
@@ -127,7 +140,6 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Đồng thời phát thông báo chúc mừng toàn hệ thống qua bảng thông báo nội bộ
       await prisma.departmentReport.create({
         data: {
           title: `🎉 [${code}] ${title}`,
@@ -164,9 +176,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (body?.action === "APPLY_PERMISSION") {
-      // Chỉ ADMIN mới được phép thực thi cấp quyền hệ thống dựa trên chữ ký của Giám đốc
       if (user.actorType !== "ADMIN" && user.role !== "ADMIN") {
-        return forbiddenResponse("Chỉ Tác nhân ADMIN mới có quyền thực thi cấp quyền hệ thống dựa trên quyết định của Giám đốc");
+        return forbiddenResponse(
+          "Chỉ Tác nhân ADMIN mới có quyền thực thi cấp quyền hệ thống dựa trên quyết định của Giám đốc"
+        );
       }
 
       const parsed = ApplyPromotionSchema.safeParse(body);
@@ -222,6 +235,20 @@ export async function POST(req: NextRequest) {
             position: decision.newPosition,
             appointedDecisionCode: decision.code,
           },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            actorType: true,
+            department: true,
+            position: true,
+            appointedDecisionCode: true,
+            initials: true,
+            avatar: true,
+            isActive: true,
+            updatedAt: true,
+          },
         }),
         prisma.promotionDecision.update({
           where: { id: decision.id },
@@ -248,6 +275,8 @@ export async function POST(req: NextRequest) {
         },
       });
 
+      invalidateUserSessionCache(updatedUser.id);
+
       return NextResponse.json({
         success: true,
         message: `Admin đã cấp quyền "${decision.newPosition}" (${deptUpper}) cho ${updatedUser.name} theo Quyết định [${decision.code}] của Giám đốc!`,
@@ -267,4 +296,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

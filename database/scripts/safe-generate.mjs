@@ -33,6 +33,11 @@ function copyWithoutLockedDll(srcDir, destDir) {
     const destPath = path.join(destDir, entry.name);
     if (entry.isDirectory()) {
       copyWithoutLockedDll(srcPath, destPath);
+    } else if (entry.name.endsWith(".js") || entry.name.endsWith(".d.ts") || entry.name.endsWith(".prisma")) {
+      const content = fs.readFileSync(srcPath, "utf8")
+        .replace(/sqlite-stage/g, "sqlite")
+        .replace(/schema\.__stage__\.prisma/g, "schema.prisma");
+      fs.writeFileSync(destPath, content, "utf8");
     } else {
       fs.copyFileSync(srcPath, destPath);
     }

@@ -1,12 +1,13 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { RotateCcw, SlidersHorizontal } from "lucide-react";
-import { STATUS_LIST, SOURCE_LIST, SALES_LIST } from "@/data/mockLeads";
+import { STATUS_LIST, SOURCE_LIST } from "@/data/mockLeads";
 import { SearchInput } from "@/components/ui/feedback-states";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { sharedGetJson } from "@/lib/shared-fetch";
 
 export const PRODUCT_FILTER_OPTIONS = [
   { value: "all", label: "Tất cả sản phẩm" },
@@ -45,7 +46,7 @@ interface LeadFiltersProps {
   totalFiltered: number;
 }
 
-export function LeadFilters({
+export const LeadFilters = React.memo(function LeadFilters({
   search,
   onSearchChange,
   statusFilter,
@@ -65,6 +66,27 @@ export function LeadFilters({
   onResetFilters,
   totalFiltered,
 }: LeadFiltersProps) {
+  const [salesUsers, setSalesUsers] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    let active = true;
+    sharedGetJson("/api/users?role=SALES", 60_000)
+      .then(({ ok, payload }) => {
+        if (active && ok && payload?.success && Array.isArray(payload.data?.users)) {
+          setSalesUsers(
+            payload.data.users.map((u: { id: string; name: string }) => ({
+              id: u.id,
+              name: u.name,
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const activeFlags = [
     Boolean(search.trim()),
     statusFilter !== "all",
@@ -82,7 +104,7 @@ export function LeadFilters({
 
   return (
     <div className="crm-card p-3 space-y-2.5">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
         <span
           className="hidden xl:inline-flex h-9 items-center gap-1.5 pr-1 text-xs font-semibold text-slate-500"
           aria-hidden="true"
@@ -96,7 +118,7 @@ export function LeadFilters({
           onChange={onSearchChange}
           placeholder="Tìm tên khách, công ty, SĐT, mã Lead..."
           aria-label="Tìm kiếm Lead"
-          containerClassName="w-full sm:w-72 sm:flex-none"
+          containerClassName="col-span-2 w-full sm:w-72 sm:flex-none"
         />
 
         <select
@@ -134,8 +156,8 @@ export function LeadFilters({
           className={selectClass(salesFilter !== "all")}
         >
           <option value="all">Sales: Tất cả</option>
-          {SALES_LIST.map((sl) => (
-            <option key={sl.name} value={sl.name}>
+          {salesUsers.map((sl) => (
+            <option key={sl.id} value={sl.id}>
               {sl.name}
             </option>
           ))}
@@ -158,7 +180,7 @@ export function LeadFilters({
           value={dateFilter}
           onChange={(e) => onDateFilterChange?.(e.target.value)}
           aria-label="Lọc theo thời gian tiếp nhận"
-          className={selectClass(dateFilter !== "all")}
+          className={cn(selectClass(dateFilter !== "all"), "col-span-2 sm:col-span-1")}
         >
           {DATE_FILTER_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -168,13 +190,13 @@ export function LeadFilters({
         </select>
 
         {dateFilter === "custom" && (
-          <div className="flex items-center gap-1.5 animate-dropdown-in">
+          <div className="col-span-2 flex items-center gap-1.5 animate-dropdown-in">
             <input
               type="date"
               value={customDateFrom}
               onChange={(e) => onCustomDateFromChange?.(e.target.value)}
               aria-label="Từ ngày"
-              className="crm-input w-auto"
+              className="crm-input w-full sm:w-auto"
             />
             <span className="text-slate-400">–</span>
             <input
@@ -182,7 +204,7 @@ export function LeadFilters({
               value={customDateTo}
               onChange={(e) => onCustomDateToChange?.(e.target.value)}
               aria-label="Đến ngày"
-              className="crm-input w-auto"
+              className="crm-input w-full sm:w-auto"
             />
           </div>
         )}
@@ -217,4 +239,4 @@ export function LeadFilters({
       </div>
     </div>
   );
-}
+});

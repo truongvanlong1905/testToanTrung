@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser, resolveActorAndDept } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+const meProfileCache = new Map<string, { data: Record<string, unknown>; expiresAt: number }>();
+const ME_CACHE_TTL_MS = 8_000;
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getCurrentUser(req);
@@ -17,6 +20,15 @@ export async function GET(req: NextRequest) {
         },
         { status: 401 }
       );
+    }
+
+    const now = Date.now();
+    const cached = meProfileCache.get(session.userId);
+    if (cached && now < cached.expiresAt) {
+      return NextResponse.json({
+        success: true,
+        data: { user: cached.data },
+      });
     }
 
     const user = await prisma.user.findUnique({
@@ -41,6 +53,7 @@ export async function GET(req: NextRequest) {
     });
 
     if (!user || !user.isActive) {
+      meProfileCache.delete(session.userId);
       return NextResponse.json(
         {
           success: false,
@@ -51,18 +64,22 @@ export async function GET(req: NextRequest) {
     }
 
     const resolved = resolveActorAndDept(user);
+    const payload = {
+      ...user,
+      role: resolved.effectiveRole,
+      actorType: resolved.actorType,
+      department: resolved.department,
+      position: resolved.position,
+    };
+
+    meProfileCache.set(session.userId, {
+      data: payload,
+      expiresAt: now + ME_CACHE_TTL_MS,
+    });
 
     return NextResponse.json({
       success: true,
-      data: {
-        user: {
-          ...user,
-          role: resolved.effectiveRole,
-          actorType: resolved.actorType,
-          department: resolved.department,
-          position: resolved.position,
-        },
-      },
+      data: { user: payload },
     });
   } catch {
     return NextResponse.json(

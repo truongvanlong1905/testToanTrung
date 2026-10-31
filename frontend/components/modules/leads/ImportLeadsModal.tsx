@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useDeferredValue, useMemo, useRef, useState } from "react";
 import {
   Upload,
   Sparkles,
@@ -105,12 +105,13 @@ function parseRawLeadText(raw: string): ParsedImportRow[] {
   return result;
 }
 
-export function ImportLeadsModal({
+export const ImportLeadsModal = React.memo(function ImportLeadsModal({
   isOpen,
   onClose,
   onImported,
 }: ImportLeadsModalProps) {
   const [rawText, setRawText] = useState("");
+  const deferredRawText = useDeferredValue(rawText);
   const [autoAssignRoundRobin, setAutoAssignRoundRobin] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -121,7 +122,7 @@ export function ImportLeadsModal({
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const parsedRows = useMemo(() => parseRawLeadText(rawText), [rawText]);
+  const parsedRows = useMemo(() => parseRawLeadText(deferredRawText), [deferredRawText]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -341,4 +342,4 @@ export function ImportLeadsModal({
       </div>
     </Modal>
   );
-}
+});

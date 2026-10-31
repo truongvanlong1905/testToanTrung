@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   Phone,
@@ -26,12 +27,17 @@ import {
   Flame,
   ShieldCheck,
   History,
+  Sparkles,
+  Copy,
+  Zap,
 } from "lucide-react";
 import { Lead, LeadQuoteItem, LeadStatus, LeadActivityType } from "@/types/lead";
 import { STATUS_LIST } from "@/data/mockLeads";
 import { getLeadStatusTone, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UnderlineTabs } from "@/components/ui/segmented-control";
+import { lockBodyScroll, unlockBodyScroll, recordModalOpenMetric } from "@/components/ui/modal";
+import { sharedGetJson } from "@/lib/shared-fetch";
 import { cn } from "@/lib/utils";
 
 interface LeadDetailModalProps {
@@ -284,7 +290,7 @@ function openPrintableQuoteWindow(lead: Lead, quote: LeadQuoteItem) {
   win.document.close();
 }
 
-export function LeadDetailModal({
+export const LeadDetailModal = React.memo(function LeadDetailModal({
   lead,
   onClose,
   onUpdateStatus,
@@ -341,6 +347,25 @@ export function LeadDetailModal({
   const [activityFollowUp, setActivityFollowUp] = useState("");
   const [isLoggingActivity, setIsLoggingActivity] = useState(false);
 
+  // AI Sales Co-Pilot State
+  const [isRunningCopilot, setIsRunningCopilot] = useState(false);
+  const [aiCopilot, setAiCopilot] = useState<{
+    aiEngine: string;
+    recommendedConfig: {
+      moduleSpec: string;
+      widthMeters: number;
+      heightMeters: number;
+      areaSqm: number;
+      unitPriceVnd: number;
+      processorVnd: number;
+      structureInstallVnd: number;
+      estimatedTotalVnd: number;
+      rationale: string;
+    };
+    outreachMessage: string;
+    nextBestActions: string[];
+  } | null>(null);
+
   const showFeedback = (tone: "success" | "error", text: string) => {
     setFeedbackMsg({ tone, text });
     window.setTimeout(() => {
@@ -370,16 +395,18 @@ export function LeadDetailModal({
   );
 
   useEffect(() => {
+    if (!lead) return;
+    const openStartMs = typeof performance !== "undefined" ? performance.now() : 0;
+    lockBodyScroll();
+    recordModalOpenMetric(`Chi tiết Lead ${lead.code}`, openStartMs);
+
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    if (lead) {
-      window.addEventListener("keydown", handleEsc);
-      document.body.classList.add("overflow-locked");
-    }
+    window.addEventListener("keydown", handleEsc);
     return () => {
       window.removeEventListener("keydown", handleEsc);
-      document.body.classList.remove("overflow-locked");
+      unlockBodyScroll();
     };
   }, [lead, onClose]);
 
@@ -391,6 +418,7 @@ export function LeadDetailModal({
     setFailureReason("");
     setStatusError(null);
     setFeedbackMsg(null);
+    setAiCopilot(null);
     setActiveTab("dossier");
     setSlaDateInput(toDatetimeLocalValue(lead?.nextFollowUpAt));
     setSlaNoteInput(lead?.nextActionNote || "");
@@ -399,13 +427,12 @@ export function LeadDetailModal({
       setIsLoadingDetail(true);
       refreshLeadDetail(lead.id).finally(() => setIsLoadingDetail(false));
 
-      fetch("/api/users?role=SALES")
-        .then((res) => res.json())
-        .then((json) => {
-          if (json.success && json.data?.users) {
-            setSalesList(json.data.users);
-            if (json.data.users.length > 0) {
-              setNewSalesId(json.data.users[0].id);
+      sharedGetJson("/api/users?role=SALES", 60_000)
+        .then(({ ok, payload }) => {
+          if (ok && payload?.success && Array.isArray(payload.data?.users)) {
+            setSalesList(payload.data.users);
+            if (payload.data.users.length > 0) {
+              setNewSalesId(payload.data.users[0].id);
             }
           }
         })
@@ -413,10 +440,60 @@ export function LeadDetailModal({
     }
   }, [lead, refreshLeadDetail]);
 
-  if (!lead) return null;
+  if (!lead || typeof document === "undefined") return null;
 
   const currentLead = detailedLead || lead;
   const isDirectorOrAdmin = currentUserRole === "DIRECTOR" || currentUserRole === "ADMIN";
+
+  const handleRunAiCopilot = async () => {
+    setIsRunningCopilot(true);
+    try {
+      const res = await fetch("/api/leads/ai-assist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "SALES_COPILOT",
+          leadId: currentLead.id,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success || !json.data) {
+        throw new Error(json.error?.message || "Không thể chạy phân tích AI Co-Pilot");
+      }
+      setAiCopilot(json.data);
+    } catch (err: any) {
+      showFeedback("error", err.message || "Lỗi kết nối AI Co-Pilot");
+    } finally {
+      setIsRunningCopilot(false);
+    }
+  };
+
+  const handleApplyAiToQuoteBuilder = () => {
+    if (!aiCopilot) return;
+    const cfg = aiCopilot.recommendedConfig;
+    setModuleSpec(cfg.moduleSpec);
+    setWidthMeters(cfg.widthMeters);
+    setHeightMeters(cfg.heightMeters);
+    setUnitPriceVnd(cfg.unitPriceVnd);
+    setProcessorVnd(cfg.processorVnd);
+    setStructureInstallVnd(cfg.structureInstallVnd);
+    setQuoteNotes(cfg.rationale);
+    setActiveTab("quote");
+    showFeedback(
+      "success",
+      `Đã áp dụng cấu hình AI (${cfg.widthMeters}m × ${cfg.heightMeters}m = ${cfg.areaSqm}m²) sang Dự toán Báo giá!`
+    );
+  };
+
+  const handleCopyOutreach = async () => {
+    if (!aiCopilot?.outreachMessage) return;
+    try {
+      await navigator.clipboard.writeText(aiCopilot.outreachMessage);
+      showFeedback("success", "Đã sao chép kịch bản tin nhắn Zalo / Email để gửi khách hàng!");
+    } catch {
+      showFeedback("error", "Không thể truy cập bộ nhớ tạm trình duyệt");
+    }
+  };
 
   // Live LED Quotation math
   const safeWidth = Math.max(0.2, Number(widthMeters) || 0.2);
@@ -626,9 +703,9 @@ export function LeadDetailModal({
   const score = currentLead.priorityScore ?? 35;
   const tier = currentLead.priorityTier || (score >= 70 ? "HOT" : score >= 40 ? "WARM" : "COLD");
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 animate-fade-in"
+      className="fixed inset-0 z-[85] flex justify-end bg-slate-950/60 animate-fade-in"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -636,7 +713,7 @@ export function LeadDetailModal({
     >
       {/* Right Enterprise Slide-Over Sheet */}
       <div
-        className="w-full max-w-3xl h-full bg-elevated border-l border-slate-200 shadow-floating flex flex-col overflow-hidden animate-sheet-in"
+        className="sheet-panel w-full max-w-3xl h-full bg-elevated border-l border-slate-200 shadow-floating flex flex-col overflow-hidden animate-sheet-in"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Sheet Header */}
@@ -778,6 +855,103 @@ export function LeadDetailModal({
           {/* ================= TAB 1: HỒ SƠ & SLA ================= */}
           {activeTab === "dossier" && (
             <>
+              {/* 0. AI SALES CO-PILOT */}
+              <section className="rounded-xl border border-blue-200/90 bg-gradient-to-br from-blue-50/75 to-violet-50/50 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-violet-600 text-white flex items-center justify-center shrink-0">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-[13px] font-semibold text-slate-900">
+                        AI Co-Pilot Đề xuất Cấu hình LED &amp; Kịch bản Chốt Sale
+                      </h3>
+                      <p className="text-[11.5px] text-slate-500">
+                        Tự động tính kích thước m² chuẩn 16:9, chọn dòng Module &amp; soạn tin nhắn Zalo gửi {currentLead.customerName}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    isLoading={isRunningCopilot}
+                    leftIcon={<Sparkles className="w-3.5 h-3.5" />}
+                    onClick={() => void handleRunAiCopilot()}
+                  >
+                    {aiCopilot ? "Phân tích lại bằng AI" : "AI Phân tích & Soạn kịch bản"}
+                  </Button>
+                </div>
+
+                {aiCopilot && (
+                  <div className="space-y-3 pt-2 border-t border-blue-100 animate-fade-in">
+                    <div className="p-3 rounded-xl bg-white border border-slate-200/90 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-blue-700">
+                          {aiCopilot.recommendedConfig.moduleSpec}
+                        </span>
+                        <span className="text-xs font-bold text-slate-900 kpi-number">
+                          {aiCopilot.recommendedConfig.widthMeters}m ×{" "}
+                          {aiCopilot.recommendedConfig.heightMeters}m (
+                          {aiCopilot.recommendedConfig.areaSqm} m²) · ~
+                          {formatVnd(aiCopilot.recommendedConfig.estimatedTotalVnd)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        {aiCopilot.recommendedConfig.rationale}
+                      </p>
+                      <div className="pt-1 flex justify-end">
+                        <Button
+                          type="button"
+                          variant="subtle"
+                          size="sm"
+                          leftIcon={<Zap className="w-3.5 h-3.5" />}
+                          onClick={handleApplyAiToQuoteBuilder}
+                        >
+                          Đẩy cấu hình này sang Báo giá m² →
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white border border-slate-200/90 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11.5px] font-semibold uppercase tracking-wide text-slate-500">
+                          Kịch bản tin nhắn Zalo / Email gửi khách
+                        </span>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          leftIcon={<Copy className="w-3.5 h-3.5 text-blue-600" />}
+                          onClick={() => void handleCopyOutreach()}
+                        >
+                          Sao chép gửi Zalo
+                        </Button>
+                      </div>
+                      <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
+                        {aiCopilot.outreachMessage}
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        3 bước hành động ưu tiên tiếp theo ({aiCopilot.aiEngine})
+                      </span>
+                      <ul className="space-y-1">
+                        {aiCopilot.nextBestActions.map((step, i) => (
+                          <li key={i} className="text-xs text-slate-700 flex items-start gap-2">
+                            <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                              {i + 1}
+                            </span>
+                            <span>{step}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </section>
+
               {/* 1. TRẠNG THÁI */}
               <section className="space-y-3">
                 <h3 className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-400">
@@ -1748,6 +1922,7 @@ export function LeadDetailModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
-}
+});

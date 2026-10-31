@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   FileSpreadsheet,
   Download,
@@ -24,6 +24,11 @@ import {
   Shield,
   Lock,
   Globe,
+  Sparkles,
+  LayoutList,
+  AlignLeft,
+  Eye,
+  X,
 } from "lucide-react";
 import { Lead } from "@/types/lead";
 import { ReportItem } from "@/types/report";
@@ -78,6 +83,798 @@ const DEPARTMENT_FILTERS = [
   { id: "ADMIN", label: "Ban Giám Đốc" },
 ] as const;
 
+function parseVndFromLead(raw?: string): number {
+  if (!raw) return 0;
+  const digits = raw.replace(/[^\d]/g, "");
+  return digits ? Number(digits) || 0 : 0;
+}
+
+/**
+ * Renders structured / Markdown report content as a clean executive document
+ * (real headings, bold text, callouts, bullet lists, and bordered tables — zero raw # or ** noise).
+ */
+const FormattedReportBody = React.memo(function FormattedReportBody({ content }: { content: string }) {
+  const lines = (content || "").split(/\r?\n/);
+  const blocks: React.ReactNode[] = [];
+  let tableRows: string[][] = [];
+
+  const renderInline = (text: string) => {
+    const clean = text.replace(/<\/?u>/g, "");
+    const parts = clean.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, idx) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return (
+          <strong key={idx} className="font-semibold text-slate-900">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      return <React.Fragment key={idx}>{part}</React.Fragment>;
+    });
+  };
+
+  const flushTable = (keyPrefix: string) => {
+    if (tableRows.length === 0) return;
+    const dataRows = tableRows.filter(
+      (r) => !r.every((cell) => /^(?:-|:|\s)+$/.test(cell))
+    );
+    if (dataRows.length > 0) {
+      const header = dataRows[0];
+      const body = dataRows.slice(1);
+      blocks.push(
+        <div
+          key={`tbl-${keyPrefix}`}
+          className="my-3 overflow-x-auto rounded-lg border border-slate-200"
+        >
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700 border-b border-slate-200">
+                {header.map((h, i) => (
+                  <th key={i} className="px-3 py-2 text-left font-semibold">
+                    {renderInline(h)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {body.map((row, rIdx) => (
+                <tr key={rIdx}>
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx} className="px-3 py-2 text-slate-700">
+                      {renderInline(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+    tableRows = [];
+  };
+
+  lines.forEach((rawLine, idx) => {
+    const trimmed = rawLine.trim();
+
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      const cells = trimmed
+        .slice(1, -1)
+        .split("|")
+        .map((c) => c.trim());
+      tableRows.push(cells);
+      return;
+    }
+
+    flushTable(String(idx));
+
+    if (!trimmed) {
+      blocks.push(<div key={`sp-${idx}`} className="h-2" />);
+      return;
+    }
+
+    if (trimmed.startsWith("# ")) {
+      blocks.push(
+        <h4
+          key={`h1-${idx}`}
+          className="mt-3 mb-1.5 text-[13.5px] font-bold uppercase tracking-wide text-blue-800 border-b border-blue-100 pb-1"
+        >
+          {renderInline(trimmed.slice(2))}
+        </h4>
+      );
+      return;
+    }
+
+    if (trimmed.startsWith("## ")) {
+      blocks.push(
+        <h5
+          key={`h2-${idx}`}
+          className="mt-2.5 mb-1 text-[13px] font-semibold text-slate-900"
+        >
+          {renderInline(trimmed.slice(3))}
+        </h5>
+      );
+      return;
+    }
+
+    if (trimmed.startsWith("> ")) {
+      blocks.push(
+        <div
+          key={`qt-${idx}`}
+          className="my-2 px-3.5 py-2.5 rounded-lg bg-amber-50/80 border-l-3 border border-amber-200 text-xs text-amber-950"
+        >
+          {renderInline(trimmed.slice(2))}
+        </div>
+      );
+      return;
+    }
+
+    if (/^[-•]\s+/.test(trimmed)) {
+      blocks.push(
+        <div key={`li-${idx}`} className="flex items-start gap-2 text-[13.5px] text-slate-700 py-0.5 pl-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-2 shrink-0" />
+          <span className="leading-relaxed">{renderInline(trimmed.replace(/^[-•]\s+/, ""))}</span>
+        </div>
+      );
+      return;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+      blocks.push(
+        <div key={`ol-${idx}`} className="flex items-start gap-2 text-[13.5px] text-slate-700 py-0.5 pl-1">
+          <span className="font-semibold text-blue-700 shrink-0">{numMatch?.[1]}.</span>
+          <span className="leading-relaxed">{renderInline(numMatch?.[2] || trimmed)}</span>
+        </div>
+      );
+      return;
+    }
+
+    blocks.push(
+      <p key={`p-${idx}`} className="text-[13.5px] text-slate-700 leading-relaxed">
+        {renderInline(trimmed)}
+      </p>
+    );
+  });
+
+  flushTable("end");
+
+  return <div className="space-y-1">{blocks}</div>;
+});
+
+interface ReportComposerModalProps {
+  open: boolean;
+  onClose: () => void;
+  leads: Lead[];
+  currentUserRole: string;
+  isAdmin: boolean;
+  onShowToast: (msg: string) => void;
+  onSubmitted: () => void;
+}
+
+const ReportComposerModal = React.memo(function ReportComposerModal({
+  open,
+  onClose,
+  leads,
+  currentUserRole,
+  isAdmin,
+  onShowToast,
+  onSubmitted,
+}: ReportComposerModalProps) {
+  const [reportType, setReportType] = useState<string>("periodic");
+  const [reportTitle, setReportTitle] = useState("");
+  const [reportContent, setReportContent] = useState("");
+  const [secResults, setSecResults] = useState("");
+  const [secIssues, setSecIssues] = useState("");
+  const [secNextPlan, setSecNextPlan] = useState("");
+  const [attachmentName, setAttachmentName] = useState<string | null>(null);
+  const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null);
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [editorMode, setEditorMode] = useState<"structured" | "write" | "preview">("structured");
+  const [editorError, setEditorError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setEditorError(null);
+      setReportType("periodic");
+      setReportTitle("");
+      setReportContent("");
+      setSecResults("");
+      setSecIssues("");
+      setSecNextPlan("");
+      setAttachmentName(null);
+      setAttachmentUrl(null);
+      setEditorMode("structured");
+    }
+  }, [open]);
+
+  const insertFormatting = (
+    prefix: string,
+    suffix: string = "",
+    defaultPlaceholder: string = ""
+  ) => {
+    const textarea = document.getElementById(
+      "word_editor_textarea"
+    ) as HTMLTextAreaElement | null;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText =
+      reportContent.substring(start, end) || defaultPlaceholder;
+
+    const newContent =
+      reportContent.substring(0, start) +
+      prefix +
+      selectedText +
+      suffix +
+      reportContent.substring(end);
+
+    setReportContent(newContent);
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(
+        start + prefix.length,
+        start + prefix.length + selectedText.length
+      );
+    });
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploadingFile(true);
+      setEditorError(null);
+      const formData = new FormData();
+      formData.set("file", file);
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error?.message || "Tải tệp đính kèm thất bại");
+      }
+
+      setAttachmentName(file.name);
+      setAttachmentUrl(json.data.fileUrl);
+      onShowToast(`Đã đính kèm tệp "${file.name}"`);
+    } catch (err) {
+      setEditorError(
+        err instanceof Error ? err.message : "Không thể tải tệp lên máy chủ"
+      );
+    } finally {
+      setIsUploadingFile(false);
+    }
+  };
+
+  const compileEffectiveReportBody = useCallback(() => {
+    if (editorMode === "write") {
+      return reportContent.trim();
+    }
+    if (secResults.trim() || secIssues.trim() || secNextPlan.trim()) {
+      const parts: string[] = [];
+      const typeObj = REPORT_TYPES.find((t) => t.id === reportType);
+      if (typeObj) {
+        parts.push(`> Phân loại văn bản: **${typeObj.label}**`);
+      }
+      if (secResults.trim()) {
+        parts.push(`# I. KẾT QUẢ THỰC HIỆN & SỐ LIỆU ĐẠT ĐƯỢC\n${secResults.trim()}`);
+      }
+      if (secIssues.trim()) {
+        parts.push(`# II. VƯỚNG MẮC & ĐỀ XUẤT HƯỚNG XỬ LÝ\n${secIssues.trim()}`);
+      }
+      if (secNextPlan.trim()) {
+        parts.push(`# III. KẾ HOẠCH TRỌNG TÂM TIẾP THEO\n${secNextPlan.trim()}`);
+      }
+      return parts.join("\n\n");
+    }
+    return reportContent.trim();
+  }, [editorMode, reportContent, secResults, secIssues, secNextPlan, reportType]);
+
+  const handleAutoFillFromRealWebData = () => {
+    const todayStr = new Date().toLocaleDateString("vi-VN");
+    const totalCount = leads.length;
+    const newCount = leads.filter((l) => l.status === "Vừa nhận thông tin").length;
+    const quotingCount = leads.filter(
+      (l) => l.status === "Đang soạn báo giá" || l.status === "Đã gửi báo giá"
+    ).length;
+    const wonCount = leads.filter((l) => l.status === "Chốt thành công").length;
+    const lostCount = leads.filter((l) => l.status === "Thất bại").length;
+    const totalPipelineVnd = leads.reduce((sum, l) => sum + parseVndFromLead(l.estimatedValue), 0);
+    const wonVnd = leads
+      .filter((l) => l.status === "Chốt thành công")
+      .reduce((sum, l) => sum + parseVndFromLead(l.estimatedValue), 0);
+
+    const deptLabel = DEPARTMENT_META[currentUserRole]?.shortLabel || currentUserRole;
+    setReportTitle(`Báo cáo tổng hợp số liệu thực tế ${deptLabel} — Ngày ${todayStr}`);
+
+    const topLeadsSummary = leads
+      .slice(0, 4)
+      .map(
+        (l) =>
+          `- **${l.code}** (${l.customerName} — ${l.companyName}): ${l.product} · Trạng thái: **${l.status}** (${l.estimatedValue || "Đang khảo sát"})`
+      )
+      .join("\n");
+
+    const resultsBlock = [
+      `- Tổng số hồ sơ Lead thực tế trên hệ thống: **${totalCount} hồ sơ** (Tổng giá trị dự toán ghi nhận: **${totalPipelineVnd > 0 ? `${totalPipelineVnd.toLocaleString("vi-VN")} đ` : "Đang cập nhật"}**).`,
+      `- Phân bổ tiến độ thực tế: **${newCount}** Lead mới tiếp nhận · **${quotingCount}** hồ sơ đang báo giá · **${wonCount}** hợp đồng chốt thành công (${wonVnd > 0 ? `${wonVnd.toLocaleString("vi-VN")} đ` : "0 đ"}) · **${lostCount}** hồ sơ thất bại/tạm dừng.`,
+      topLeadsSummary ? `\nCác hồ sơ trọng tâm gần nhất trên hệ thống:\n${topLeadsSummary}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const issuesBlock =
+      quotingCount > 0
+        ? `- Có **${quotingCount} hồ sơ đang trong giai đoạn báo giá** cần bám sát tiến độ phản hồi và hỗ trợ khung giá để nâng tỷ lệ chốt.`
+        : newCount > 0
+          ? `- Có **${newCount} Lead mới vừa nhận thông tin** cần liên hệ khảo sát mặt bằng trong khung SLA 2 giờ.`
+          : `- Hiện chưa phát sinh tồn đọng quá hạn trên hệ thống.`;
+
+    const planBlock = [
+      `1. Liên hệ xác nhận kích thước mặt bằng và gửi báo giá PDF chi tiết cho toàn bộ hồ sơ mới tiếp nhận.`,
+      `2. Rà soát các hồ sơ có mức chiết khấu > 8% hoặc giá trị >= 200 triệu đồng để trình Ban Giám Đốc phê duyệt sớm.`,
+    ].join("\n");
+
+    setSecResults(resultsBlock);
+    setSecIssues(issuesBlock);
+    setSecNextPlan(planBlock);
+    setReportContent(
+      `# I. KẾT QUẢ THỰC HIỆN & SỐ LIỆU ĐẠT ĐƯỢC\n${resultsBlock}\n\n# II. VƯỚNG MẮC & ĐỀ XUẤT HƯỚNG XỬ LÝ\n${issuesBlock}\n\n# III. KẾ HOẠCH TRỌNG TÂM TIẾP THEO\n${planBlock}`
+    );
+    setEditorError(null);
+    onShowToast("Đã tự động tổng hợp số liệu thực tế trên hệ thống vào báo cáo!");
+  };
+
+  const handleCloseWithDraftGuard = () => {
+    const hasDraft = Boolean(
+      reportTitle.trim() ||
+        reportContent.trim() ||
+        secResults.trim() ||
+        secIssues.trim() ||
+        secNextPlan.trim() ||
+        attachmentName
+    );
+    if (
+      hasDraft &&
+      !window.confirm("Đóng trình soạn thảo? Nội dung báo cáo chưa gửi sẽ bị mất.")
+    ) {
+      return;
+    }
+    onClose();
+  };
+
+  const handleSubmitReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditorError(null);
+    const finalContent = compileEffectiveReportBody();
+    if (!reportTitle.trim()) {
+      setEditorError("Vui lòng nhập tiêu đề báo cáo.");
+      return;
+    }
+    if (!finalContent) {
+      setEditorError("Vui lòng nhập kết quả thực hiện hoặc nội dung báo cáo.");
+      return;
+    }
+
+    try {
+      setIsSubmittingReport(true);
+      const res = await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: reportTitle.trim(),
+          content: finalContent,
+          attachmentName,
+          attachmentUrl,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error?.message || "Lỗi gửi báo cáo");
+      }
+
+      onShowToast(json.message || "Đã gửi báo cáo thành công");
+      onClose();
+      onSubmitted();
+    } catch (err) {
+      setEditorError(
+        err instanceof Error ? err.message : "Gửi báo cáo thất bại"
+      );
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  };
+
+  const compiledPreviewBody = useMemo(() => {
+    if (editorMode !== "preview") return "";
+    return compileEffectiveReportBody();
+  }, [editorMode, compileEffectiveReportBody]);
+
+  return (
+    <Modal
+      open={open}
+      onClose={handleCloseWithDraftGuard}
+      preventClose={isSubmittingReport}
+      size="xl"
+      title="Soạn báo cáo & Tờ trình điều hành"
+      icon={<FileText className="w-4 h-4" />}
+      description={
+        isAdmin
+          ? "Phát hành thông báo chỉ đạo hoặc tổng hợp báo cáo điều hành tới các phòng ban"
+          : `Đơn vị gửi: ${DEPARTMENT_META[currentUserRole]?.label || currentUserRole} → Trình Ban Giám Đốc`
+      }
+      headerExtra={
+        <div className="hidden sm:inline-flex items-center p-1 rounded-xl bg-slate-100 border border-slate-200/80 text-xs">
+          <button
+            type="button"
+            onClick={() => setEditorMode("structured")}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer",
+              editorMode === "structured"
+                ? "bg-white text-slate-900 shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            )}
+          >
+            <LayoutList className="w-3.5 h-3.5 text-blue-600" />
+            <span>Biểu mẫu chuẩn</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!reportContent.trim()) {
+                setReportContent(compileEffectiveReportBody());
+              }
+              setEditorMode("write");
+            }}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer",
+              editorMode === "write"
+                ? "bg-white text-slate-900 shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            )}
+          >
+            <AlignLeft className="w-3.5 h-3.5" />
+            <span>Soạn tự do</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditorMode("preview")}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer",
+              editorMode === "preview"
+                ? "bg-white text-slate-900 shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            )}
+          >
+            <Eye className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Xem bản A4</span>
+          </button>
+        </div>
+      }
+      footer={
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="text-xs text-slate-500 flex items-center gap-2">
+            <Shield className="w-4 h-4 text-blue-600 shrink-0" />
+            <span>
+              {isAdmin
+                ? "Thông báo sẽ đồng bộ trực tiếp tới Trung tâm Thông báo toàn hệ thống"
+                : "Văn bản được phân quyền bảo mật nội bộ trình Ban Giám Đốc Toàn Trung"}
+            </span>
+          </div>
+          <div className="flex items-center justify-end gap-2.5">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={isSubmittingReport}
+              onClick={handleCloseWithDraftGuard}
+            >
+              Hủy
+            </Button>
+            <Button
+              type="submit"
+              form="report-composer-form"
+              variant="primary"
+              isLoading={isSubmittingReport}
+              leftIcon={<Send className="w-3.5 h-3.5" />}
+            >
+              Phát hành báo cáo
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <form id="report-composer-form" onSubmit={handleSubmitReport} className="space-y-4">
+        {editorError && (
+          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium">
+            {editorError}
+          </div>
+        )}
+
+        <div className="p-3 rounded-xl bg-gradient-to-r from-blue-50/80 via-slate-50 to-violet-50/60 border border-blue-200/70 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {REPORT_TYPES.map((rt) => {
+              const active = reportType === rt.id;
+              return (
+                <button
+                  key={rt.id}
+                  type="button"
+                  onClick={() => setReportType(rt.id)}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer",
+                    active
+                      ? "bg-blue-600 border-blue-600 text-white"
+                      : "bg-white border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                  )}
+                >
+                  {rt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            leftIcon={<Sparkles className="w-3.5 h-3.5 text-blue-600" />}
+            onClick={handleAutoFillFromRealWebData}
+            className="bg-white border-blue-200 text-blue-700 hover:bg-blue-50"
+          >
+            Tự điền số liệu thật trên Web
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+          <div className="sm:col-span-8">
+            <label className="crm-label">
+              Tiêu đề văn bản / báo cáo <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="VD: Báo cáo tổng hợp kết quả Kinh doanh & Tiến độ khảo sát LED tuần này"
+              value={reportTitle}
+              onChange={(e) => setReportTitle(e.target.value)}
+              className="crm-input font-medium"
+            />
+          </div>
+
+          <div className="sm:col-span-4">
+            <label className="crm-label">Tệp đính kèm (PDF / Excel / CAD)</label>
+            <label className="h-9 px-3 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 hover:border-blue-300 flex items-center justify-center gap-2 cursor-pointer text-xs font-medium transition-colors">
+              <Paperclip className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span className="truncate">
+                {isUploadingFile
+                  ? "Đang tải tệp..."
+                  : attachmentName
+                    ? attachmentName
+                    : "Chọn tệp đính kèm"}
+              </span>
+              <input
+                type="file"
+                onChange={handleFileUpload}
+                className="hidden"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.png,.jpg,.jpeg"
+              />
+            </label>
+          </div>
+        </div>
+
+        {attachmentName && (
+          <div className="flex items-center justify-between px-3 py-2 bg-blue-50/70 rounded-lg border border-blue-200/80 text-xs text-blue-900">
+            <div className="flex items-center gap-2 min-w-0">
+              <Paperclip className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span className="truncate">
+                Đã đính kèm: <strong>{attachmentName}</strong>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setAttachmentName(null);
+                setAttachmentUrl(null);
+              }}
+              className="inline-flex items-center gap-1 text-rose-600 hover:text-rose-700 font-medium shrink-0 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Gỡ</span>
+            </button>
+          </div>
+        )}
+
+        {editorMode === "structured" && (
+          <div className="space-y-3.5">
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-800">
+                  I. Kết quả công việc &amp; Số liệu thực tế đạt được{" "}
+                  <span className="text-rose-500">*</span>
+                </label>
+                <span className="text-[11px] text-slate-400">Mục chính</span>
+              </div>
+              <textarea
+                rows={4}
+                value={secResults}
+                onChange={(e) => setSecResults(e.target.value)}
+                placeholder="Nêu các đầu việc đã hoàn thành, số lượng khách hàng đã tư vấn/báo giá, doanh số hoặc tiến độ thi công thực tế..."
+                className="crm-textarea bg-white text-[13px] leading-relaxed"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
+                <label className="text-xs font-semibold text-slate-800 block">
+                  II. Vướng mắc phát sinh &amp; Kiến nghị hỗ trợ
+                </label>
+                <textarea
+                  rows={3}
+                  value={secIssues}
+                  onChange={(e) => setSecIssues(e.target.value)}
+                  placeholder="Khó khăn về mặt bằng, khung giá đối thủ, đề xuất Giám đốc duyệt chiết khấu..."
+                  className="crm-textarea bg-white text-[13px] leading-relaxed"
+                />
+              </div>
+
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
+                <label className="text-xs font-semibold text-slate-800 block">
+                  III. Kế hoạch trọng tâm tiếp theo
+                </label>
+                <textarea
+                  rows={3}
+                  value={secNextPlan}
+                  onChange={(e) => setSecNextPlan(e.target.value)}
+                  placeholder="Các hạng mục ưu tiên xử lý trong ca/tuần kế tiếp..."
+                  className="crm-textarea bg-white text-[13px] leading-relaxed"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {editorMode === "write" && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-1 bg-slate-50 p-1.5 rounded-lg border border-slate-200 text-slate-700">
+              <button
+                type="button"
+                onClick={() => insertFormatting("**", "**", "Nội dung nhấn mạnh")}
+                title="In đậm"
+                className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
+              >
+                <Bold className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => insertFormatting("*", "*", "Ghi chú nghiêng")}
+                title="In nghiêng"
+                className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
+              >
+                <Italic className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => insertFormatting("<u>", "</u>", "Nội dung gạch chân")}
+                title="Gạch chân"
+                className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
+              >
+                <Underline className="w-4 h-4" />
+              </button>
+              <span className="w-px h-4 bg-slate-200 mx-1" />
+              <button
+                type="button"
+                onClick={() => insertFormatting("\n# ", "", "MỤC BÁO CÁO CHÍNH")}
+                title="Tiêu đề lớn"
+                className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
+              >
+                <Heading1 className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => insertFormatting("\n## ", "", "Tiêu đề phụ")}
+                title="Tiêu đề phụ"
+                className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
+              >
+                <Heading2 className="w-4 h-4" />
+              </button>
+              <span className="w-px h-4 bg-slate-200 mx-1" />
+              <button
+                type="button"
+                onClick={() => insertFormatting("\n- ", "", "Hạng mục công việc")}
+                title="Danh sách chấm đầu dòng"
+                className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
+              >
+                <List className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => insertFormatting("\n1. ", "", "Bước thực hiện")}
+                title="Danh sách đánh số"
+                className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
+              >
+                <ListOrdered className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => insertFormatting("\n> ", "", "Kiến nghị Ban Giám Đốc...")}
+                title="Khung kiến nghị nổi bật"
+                className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
+              >
+                <Quote className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  insertFormatting(
+                    "\n| Hạng mục dự án | Tiến độ | Giá trị | Ghi chú |\n|---|---|---|---|\n| Khảo sát mặt bằng | Hoàn tất | — | Đủ điều kiện lắp đặt |\n"
+                  )
+                }
+                title="Chèn bảng số liệu"
+                className="px-2 py-1 hover:bg-white rounded-md transition-colors cursor-pointer flex items-center gap-1 text-xs font-medium"
+              >
+                <TableIcon className="w-3.5 h-3.5" />
+                <span>Chèn bảng</span>
+              </button>
+            </div>
+
+            <textarea
+              id="word_editor_textarea"
+              rows={8}
+              placeholder="Nhập nội dung báo cáo hoặc thông báo điều hành chi tiết..."
+              value={reportContent}
+              onChange={(e) => setReportContent(e.target.value)}
+              className="crm-textarea leading-relaxed text-[13.5px]"
+            />
+          </div>
+        )}
+
+        {editorMode === "preview" && (
+          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b-2 border-blue-900 pb-3.5">
+              <div>
+                <div className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">
+                  CÔNG TY TNHH ĐIỆN TỬ VIỄN THÔNG TOÀN TRUNG
+                </div>
+                <h3 className="text-[17px] font-bold text-slate-900 mt-1">
+                  {reportTitle || "Chưa nhập tiêu đề báo cáo"}
+                </h3>
+              </div>
+              <div className="text-right text-xs text-slate-500">
+                <div>Ngày lập: {new Date().toLocaleDateString("vi-VN")}</div>
+                <div className="font-medium text-slate-700 mt-0.5">
+                  {DEPARTMENT_META[currentUserRole]?.label || currentUserRole}
+                </div>
+              </div>
+            </div>
+
+            {compiledPreviewBody ? (
+              <FormattedReportBody content={compiledPreviewBody} />
+            ) : (
+              <p className="text-xs text-slate-400 italic py-6 text-center">
+                Chưa có nội dung báo cáo để hiển thị bản xem trước.
+              </p>
+            )}
+          </div>
+        )}
+      </form>
+    </Modal>
+  );
+});
+
+const REPORT_TYPES = [
+  { id: "periodic", label: "Báo cáo kết quả công việc" },
+  { id: "project", label: "Tiến độ khảo sát & thi công LED" },
+  { id: "proposal", label: "Tờ trình / Đề xuất phê duyệt" },
+  { id: "directive", label: "Thông báo điều hành" },
+] as const;
+
 function parseLeadDate(dateStr: string): Date | null {
   if (!dateStr) return null;
   const parts = dateStr.split("/");
@@ -115,16 +912,8 @@ export function ReportsView({
   const [selectedReportDetail, setSelectedReportDetail] =
     useState<ReportItem | null>(null);
 
-  // Word-style Report Composer Modal State
+  // Executive Report Composer Modal State (isolated inside ReportComposerModal)
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [reportTitle, setReportTitle] = useState("");
-  const [reportContent, setReportContent] = useState("");
-  const [attachmentName, setAttachmentName] = useState<string | null>(null);
-  const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null);
-  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
-  const [isUploadingFile, setIsUploadingFile] = useState(false);
-  const [editorMode, setEditorMode] = useState<"write" | "preview">("write");
-  const [editorError, setEditorError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
 
@@ -134,12 +923,12 @@ export function ReportsView({
     }
   }, [userRole]);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
-  };
+  }, []);
 
-  const fetchReports = async () => {
+  const fetchReports = useCallback(async () => {
     try {
       setIsLoadingReports(true);
       setReportsError(null);
@@ -165,125 +954,11 @@ export function ReportsView({
     } finally {
       setIsLoadingReports(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchReports();
-  }, []);
-
-  // Rich formatting insertion helper
-  const insertFormatting = (
-    prefix: string,
-    suffix: string = "",
-    defaultPlaceholder: string = ""
-  ) => {
-    const textarea = document.getElementById(
-      "word_editor_textarea"
-    ) as HTMLTextAreaElement | null;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selectedText =
-      reportContent.substring(start, end) || defaultPlaceholder;
-
-    const newContent =
-      reportContent.substring(0, start) +
-      prefix +
-      selectedText +
-      suffix +
-      reportContent.substring(end);
-
-    setReportContent(newContent);
-
-    setTimeout(() => {
-      textarea.focus();
-      textarea.setSelectionRange(
-        start + prefix.length,
-        start + prefix.length + selectedText.length
-      );
-    }, 50);
-  };
-
-  // Upload attachment
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      setIsUploadingFile(true);
-      setEditorError(null);
-      const formData = new FormData();
-      formData.set("file", file);
-
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Tải tệp đính kèm thất bại");
-      }
-
-      setAttachmentName(file.name);
-      setAttachmentUrl(json.data.fileUrl);
-      showToast(`Đã đính kèm tệp "${file.name}"`);
-    } catch (err) {
-      setEditorError(
-        err instanceof Error ? err.message : "Không thể tải tệp lên máy chủ"
-      );
-    } finally {
-      setIsUploadingFile(false);
-    }
-  };
-
-  // Submit report
-  const handleSubmitReport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setEditorError(null);
-    if (!reportTitle.trim()) {
-      setEditorError("Vui lòng nhập tiêu đề báo cáo.");
-      return;
-    }
-    if (!reportContent.trim()) {
-      setEditorError("Vui lòng nhập nội dung chi tiết báo cáo.");
-      return;
-    }
-
-    try {
-      setIsSubmittingReport(true);
-      const res = await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: reportTitle.trim(),
-          content: reportContent.trim(),
-          attachmentName,
-          attachmentUrl,
-        }),
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Lỗi gửi báo cáo");
-      }
-
-      showToast(json.message || "Đã gửi báo cáo thành công");
-      setReportTitle("");
-      setReportContent("");
-      setAttachmentName(null);
-      setAttachmentUrl(null);
-      setIsEditorOpen(false);
-      fetchReports();
-    } catch (err) {
-      setEditorError(
-        err instanceof Error ? err.message : "Gửi báo cáo thất bại"
-      );
-    } finally {
-      setIsSubmittingReport(false);
-    }
-  };
+  }, [fetchReports]);
 
   // Filter reports by Date, Department, and Search
   const filteredReports = useMemo(() => {
@@ -394,27 +1069,13 @@ export function ReportsView({
     );
   }, [isAdmin, currentUserRole, departmentCounts]);
 
-  const openReportComposer = () => {
-    setEditorError(null);
-    setReportTitle("");
-    setReportContent("");
-    setAttachmentName(null);
-    setAttachmentUrl(null);
-    setEditorMode("write");
+  const openReportComposer = useCallback(() => {
     setIsEditorOpen(true);
-  };
+  }, []);
 
-  // Guard against losing a half-written report from a stray Esc / backdrop click.
-  const closeComposer = () => {
-    const hasDraft = Boolean(reportTitle.trim() || reportContent.trim() || attachmentName);
-    if (
-      hasDraft &&
-      !window.confirm("Đóng trình soạn thảo? Nội dung báo cáo chưa gửi sẽ bị mất.")
-    ) {
-      return;
-    }
+  const closeComposer = useCallback(() => {
     setIsEditorOpen(false);
-  };
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -791,288 +1452,24 @@ export function ReportsView({
         </div>
       )}
 
-      {/* WORD-STYLE REPORT COMPOSER MODAL */}
-      <Modal
+      {/* EXECUTIVE REPORT COMPOSER MODAL (Isolated State Component) */}
+      <ReportComposerModal
         open={isEditorOpen}
         onClose={closeComposer}
-        preventClose={isSubmittingReport}
-        size="xl"
-        title="Soạn thảo báo cáo công việc"
-        icon={<FileText className="w-4 h-4" />}
-        description={
-          isAdmin
-            ? "Phát hành thông báo hoặc chỉ đạo điều hành tới toàn bộ phòng ban"
-            : "Gửi báo cáo trực tiếp tới Ban Giám Đốc (Phân quyền bảo mật nội bộ)"
-        }
-        headerExtra={
-          <SegmentedControl
-            size="sm"
-            ariaLabel="Chế độ soạn thảo"
-            value={editorMode}
-            onChange={setEditorMode}
-            options={[
-              { id: "write", label: "Soạn thảo" },
-              { id: "preview", label: "Xem trước" },
-            ]}
-            className="hidden sm:inline-flex"
-          />
-        }
-        footer={
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="text-xs text-slate-500 flex items-center gap-2">
-              <Shield className="w-4 h-4 text-blue-600 shrink-0" />
-              <span>
-                {isAdmin
-                  ? "Thông báo sẽ hiển thị tới toàn bộ tài khoản phòng ban"
-                  : "Báo cáo chỉ gửi tới Ban Giám Đốc và lưu trong hồ sơ cá nhân"}
-              </span>
-            </div>
-            <div className="flex items-center justify-end gap-2.5">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={isSubmittingReport}
-                onClick={closeComposer}
-              >
-                Hủy
-              </Button>
-              <Button
-                type="submit"
-                form="report-composer-form"
-                variant="primary"
-                isLoading={isSubmittingReport}
-                leftIcon={<Send className="w-3.5 h-3.5" />}
-              >
-                Gửi báo cáo
-              </Button>
-            </div>
-          </div>
-        }
-      >
-            <form id="report-composer-form" onSubmit={handleSubmitReport}>
-              <div className="space-y-4">
-                <SegmentedControl
-                  size="sm"
-                  ariaLabel="Chế độ soạn thảo"
-                  value={editorMode}
-                  onChange={setEditorMode}
-                  options={[
-                    { id: "write", label: "Soạn thảo" },
-                    { id: "preview", label: "Xem trước" },
-                  ]}
-                  className="sm:hidden"
-                />
-                {editorError && (
-                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">
-                    {editorError}
-                  </div>
-                )}
+        leads={leads}
+        currentUserRole={currentUserRole}
+        isAdmin={isAdmin}
+        onShowToast={showToast}
+        onSubmitted={fetchReports}
+      />
 
-                <div>
-                  <label className="crm-label">
-                    Tiêu đề báo cáo <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="VD: Báo cáo tiến độ triển khai dự án màn hình LED P3 Outdoor - Tuần 44"
-                    value={reportTitle}
-                    onChange={(e) => setReportTitle(e.target.value)}
-                    className="crm-input"
-                  />
-                </div>
-
-                {editorMode === "write" ? (
-                  <div className="space-y-2">
-                    {/* Formatting Toolbar */}
-                    <div className="flex flex-wrap items-center gap-1 bg-slate-50 p-1.5 rounded-lg border border-slate-200 text-slate-700">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          insertFormatting("**", "**", "Văn bản in đậm")
-                        }
-                        title="In đậm"
-                        className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
-                      >
-                        <Bold className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          insertFormatting("*", "*", "Văn bản in nghiêng")
-                        }
-                        title="In nghiêng"
-                        className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
-                      >
-                        <Italic className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          insertFormatting("<u>", "</u>", "Văn bản gạch chân")
-                        }
-                        title="Gạch chân"
-                        className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
-                      >
-                        <Underline className="w-4 h-4" />
-                      </button>
-
-                      <span className="w-px h-4 bg-slate-200 mx-1" />
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          insertFormatting("\n# ", "", "Tiêu đề mục chính")
-                        }
-                        title="Heading 1"
-                        className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
-                      >
-                        <Heading1 className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          insertFormatting("\n## ", "", "Tiêu đề mục phụ")
-                        }
-                        title="Heading 2"
-                        className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
-                      >
-                        <Heading2 className="w-4 h-4" />
-                      </button>
-
-                      <span className="w-px h-4 bg-slate-200 mx-1" />
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          insertFormatting("\n- ", "", "Nội dung báo cáo")
-                        }
-                        title="Danh sách"
-                        className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
-                      >
-                        <List className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          insertFormatting("\n1. ", "", "Hạng mục công việc")
-                        }
-                        title="Danh sách đánh số"
-                        className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
-                      >
-                        <ListOrdered className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          insertFormatting("\n> ", "", "Đề xuất / Lưu ý...")
-                        }
-                        title="Trích dẫn"
-                        className="p-1.5 hover:bg-white rounded-md transition-colors cursor-pointer"
-                      >
-                        <Quote className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          insertFormatting(
-                            "\n| Hạng mục | Tiến độ | Dự toán | Ghi chú |\n|---|---|---|---|\n| Khung kết cấu | 100% | 45.000.000 đ | Hoàn tất |\n| Module LED | 80% | 120.000.000 đ | Đang chạy thử |"
-                          )
-                        }
-                        title="Chèn bảng số liệu"
-                        className="px-2 py-1 hover:bg-white rounded-md transition-colors cursor-pointer flex items-center gap-1 text-xs font-medium"
-                      >
-                        <TableIcon className="w-3.5 h-3.5" />
-                        <span>Chèn bảng</span>
-                      </button>
-
-                      <span className="w-px h-4 bg-slate-200 mx-1" />
-
-                      <label className="flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-blue-50 text-blue-600 rounded-md border border-slate-200 cursor-pointer text-xs font-medium transition-colors">
-                        <Paperclip className="w-3.5 h-3.5" />
-                        <span>
-                          {isUploadingFile
-                            ? "Đang tải tệp..."
-                            : "Đính kèm tệp / CAD"}
-                        </span>
-                        <input
-                          type="file"
-                          onChange={handleFileUpload}
-                          className="hidden"
-                          accept=".pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.png,.jpg,.jpeg"
-                        />
-                      </label>
-                    </div>
-
-                    <div>
-                      <textarea
-                        id="word_editor_textarea"
-                        required
-                        rows={11}
-                        placeholder={`# 1. KẾT QUẢ CÔNG VIỆC\n- Tiến độ dự án / chiến dịch:\n- Số liệu đạt được:\n\n# 2. VƯỚNG MẮC CẦN HỖ TRỢ\n> Đề xuất phương án xử lý...\n\n# 3. KẾ HOẠCH TIẾP THEO\n1. Hạng mục ưu tiên 1\n2. Hạng mục ưu tiên 2`}
-                        value={reportContent}
-                        onChange={(e) => setReportContent(e.target.value)}
-                        className="crm-textarea leading-relaxed"
-                      />
-                      <div className="text-right text-[11px] text-slate-400 mt-1 kpi-number">
-                        {reportContent.length} ký tự ·{" "}
-                        {reportContent.split(/\s+/).filter(Boolean).length} từ
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 min-h-[280px] space-y-4">
-                    <div className="border-b border-slate-200 pb-3">
-                      <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                        CÔNG TY CỔ PHẦN ĐIỆN TỬ VIỄN THÔNG TOÀN TRUNG
-                      </div>
-                      <h3 className="text-lg font-bold text-slate-900 mt-1">
-                        {reportTitle || "Tiêu đề báo cáo"}
-                      </h3>
-                      <div className="text-xs text-slate-500 mt-1">
-                        Ngày lập: {new Date().toLocaleDateString("vi-VN")} · Bộ
-                        phận:{" "}
-                        {DEPARTMENT_META[currentUserRole]?.label ||
-                          currentUserRole}
-                      </div>
-                    </div>
-
-                    <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
-                      {reportContent || "Chưa có nội dung soạn thảo."}
-                    </div>
-                  </div>
-                )}
-
-                {attachmentName && (
-                  <div className="flex items-center justify-between p-3 bg-blue-50/70 rounded-lg border border-blue-200/80 text-xs text-blue-900">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Paperclip className="w-4 h-4 text-blue-600 shrink-0" />
-                      <span className="truncate">
-                        Tệp đính kèm: <strong>{attachmentName}</strong>
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAttachmentName(null);
-                        setAttachmentUrl(null);
-                      }}
-                      className="text-rose-600 hover:text-rose-700 font-medium shrink-0 cursor-pointer"
-                    >
-                      Gỡ tệp
-                    </button>
-                  </div>
-                )}
-              </div>
-            </form>
-      </Modal>
-
-      {/* REPORT DETAIL MODAL */}
+      {/* REPORT DETAIL MODAL (Formatted A4 Document View) */}
       <Modal
         open={Boolean(selectedReportDetail)}
         onClose={() => setSelectedReportDetail(null)}
         size="lg"
         title={selectedReportDetail?.title || "Chi tiết báo cáo"}
+        icon={<FileText className="w-4 h-4" />}
         description={
           selectedReportDetail
             ? `${selectedReportDetail.createdBy.name} · ${
@@ -1091,8 +1488,8 @@ export function ReportsView({
       >
         {selectedReportDetail && (
           <div className="space-y-4">
-            <div className="text-sm text-slate-800 leading-7 whitespace-pre-wrap">
-              {selectedReportDetail.content}
+            <div className="p-5 rounded-xl bg-slate-50/70 border border-slate-200/90">
+              <FormattedReportBody content={selectedReportDetail.content} />
             </div>
 
             {selectedReportDetail.attachmentUrl && (

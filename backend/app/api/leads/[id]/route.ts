@@ -1,7 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, canAccessAllLeads, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
 import { computeLeadScore, computeLeadSla } from "@/lib/lead-scoring";
+
+const UpdateLeadSchema = z.object({
+  customerName: z.string().trim().min(2, "Tên khách hàng tối thiểu 2 ký tự").optional(),
+  companyName: z.string().trim().min(1, "Tên công ty không được để trống").optional(),
+  phone: z.string().trim().min(8, "Số điện thoại không hợp lệ").optional(),
+  email: z.string().trim().email("Email không hợp lệ").optional().nullable().or(z.literal("")),
+  installationAddress: z.string().trim().optional().nullable(),
+  location: z.string().trim().min(2).optional(),
+  product: z.string().trim().min(2, "Vui lòng nhập sản phẩm / nhu cầu LED").optional(),
+  estimatedValue: z.string().trim().optional(),
+  notes: z.string().optional().nullable(),
+  nextFollowUpAt: z.string().optional().nullable(),
+  nextActionNote: z.string().optional().nullable(),
+});
 
 export async function GET(
   req: NextRequest,
@@ -236,7 +251,24 @@ export async function PATCH(
     const { id } = await params;
     const body = await req.json();
 
-    const existing = await prisma.lead.findUnique({ where: { id } });
+    const parsedBody = UpdateLeadSchema.safeParse(body);
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: parsedBody.error.issues[0]?.message || "Thông tin cập nhật không hợp lệ",
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    const existing = await prisma.lead.findUnique({
+      where: { id },
+      include: { _count: { select: { activities: true, quotes: true } } },
+    });
     if (!existing) {
       return NextResponse.json(
         {
@@ -259,27 +291,47 @@ export async function PATCH(
       );
     }
 
+    const data = parsedBody.data;
     const parsedNextFollowUp =
-      body.nextFollowUpAt === null
+      data.nextFollowUpAt === null
         ? null
-        : body.nextFollowUpAt && !Number.isNaN(new Date(body.nextFollowUpAt).getTime())
-          ? new Date(body.nextFollowUpAt)
+        : data.nextFollowUpAt && !Number.isNaN(new Date(data.nextFollowUpAt).getTime())
+          ? new Date(data.nextFollowUpAt)
           : existing.nextFollowUpAt;
+
+    const nextEstimatedValue = data.estimatedValue ?? existing.estimatedValue;
+    const nextInstallationAddress =
+      data.installationAddress !== undefined ? data.installationAddress : existing.installationAddress;
+    const nextEmail = data.email !== undefined ? data.email || null : existing.email;
+
+    const rescored = computeLeadScore({
+      status: existing.status,
+      estimatedValue: nextEstimatedValue,
+      installationAddress: nextInstallationAddress,
+      email: nextEmail,
+      source: existing.source,
+      ledWidth: existing.ledWidth,
+      ledHeight: existing.ledHeight,
+      activitiesCount: existing._count.activities,
+      quotesCount: existing._count.quotes,
+    });
 
     const updated = await prisma.lead.update({
       where: { id },
       data: {
-        customerName: body.customerName ?? existing.customerName,
-        companyName: body.companyName ?? existing.companyName,
-        phone: body.phone ?? existing.phone,
-        email: body.email ?? existing.email,
-        installationAddress: body.installationAddress ?? existing.installationAddress,
-        location: body.location ?? existing.location,
-        product: body.product ?? existing.product,
-        estimatedValue: body.estimatedValue ?? existing.estimatedValue,
-        notes: body.notes ?? existing.notes,
+        customerName: data.customerName ?? existing.customerName,
+        companyName: data.companyName ?? existing.companyName,
+        phone: data.phone ?? existing.phone,
+        email: nextEmail,
+        installationAddress: nextInstallationAddress,
+        location: data.location ?? existing.location,
+        product: data.product ?? existing.product,
+        estimatedValue: nextEstimatedValue,
+        notes: data.notes !== undefined ? data.notes || "" : existing.notes,
         nextFollowUpAt: parsedNextFollowUp,
-        nextActionNote: body.nextActionNote !== undefined ? body.nextActionNote : existing.nextActionNote,
+        nextActionNote: data.nextActionNote !== undefined ? data.nextActionNote : existing.nextActionNote,
+        priorityScore: rescored.score,
+        priorityTier: rescored.tier,
       },
     });
 
@@ -290,7 +342,7 @@ export async function PATCH(
         action: "UPDATE_LEAD",
         entity: "LEAD",
         entityId: id,
-        details: JSON.stringify(body),
+        details: JSON.stringify(data),
       },
     });
 
@@ -299,7 +351,8 @@ export async function PATCH(
       message: "Cập nhật thông tin hồ sơ Lead thành công",
       data: { lead: updated },
     });
-  } catch {
+  } catch (error) {
+    console.error("PATCH /api/leads/[id] error:", error);
     return NextResponse.json(
       {
         success: false,

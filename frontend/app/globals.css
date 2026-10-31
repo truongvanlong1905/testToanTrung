@@ -2,11 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Theme variables (--page, --surface, --slate-*, --bg-*, --tx-*, --bd-* …) are generated from
-   tailwind.config.ts and switched by <html class="dark">. Nothing below hardcodes a theme colour. */
+/* Toàn Trung CRM — Theme variables (--page, --surface, --slate-*, --bg-*, --tx-*, --bd-*) are generated
+   from tailwind.config.ts and switched by <html class="dark">. Nothing below hardcodes a theme colour. */
 
 html {
   font-size: 16px;
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -205,7 +206,15 @@ input[type="radio"] {
   }
 }
 
-/* Lock page scroll while a modal / sheet is open */
+/* Lock page scroll while a modal / sheet is open (zero layout shift thanks to scrollbar-gutter: stable) */
 body.overflow-locked {
   overflow: hidden;
+}
+
+/* GPU-composited modal & drawer layers (transform + opacity only, zero main-thread paint churn) */
+.modal-panel,
+.sheet-panel {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }

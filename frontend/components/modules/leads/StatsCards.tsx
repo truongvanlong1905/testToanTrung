@@ -19,7 +19,12 @@ interface StatsCardsProps {
   onFilterStatus?: (status: string) => void;
 }
 
-export function StatsCards({ leads, stats, activeStatus = "all", onFilterStatus }: StatsCardsProps) {
+export const StatsCards = React.memo(function StatsCards({
+  leads,
+  stats,
+  activeStatus = "all",
+  onFilterStatus,
+}: StatsCardsProps) {
   const totalLeads = stats?.total ?? leads.length;
   const newLeads =
     stats?.newLeads ?? leads.filter((l) => l.status === "Vừa nhận thông tin").length;
@@ -35,7 +40,7 @@ export function StatsCards({ leads, stats, activeStatus = "all", onFilterStatus 
     onFilterStatus ? () => onFilterStatus(activeStatus === status ? "all" : status) : undefined;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5 sm:gap-4">
       <StatCard
         label="Tổng Lead"
         value={totalLeads.toLocaleString("vi-VN")}
@@ -85,4 +90,4 @@ export function StatsCards({ leads, stats, activeStatus = "all", onFilterStatus 
       />
     </div>
   );
-}
+});

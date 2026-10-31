@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser, unauthorizedResponse } from "@/lib/auth";
+import { getCurrentUser, unauthorizedResponse, forbiddenResponse } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,23 @@ export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser(req);
     if (!user) return unauthorizedResponse();
+
+    // Phân quyền chuẩn RBAC: Chỉ nhân sự thuộc ADS, MARKETING, DIRECTOR hoặc ADMIN được xem dữ liệu chiến dịch Quảng cáo
+    const canViewAds =
+      user.role === "ADS" ||
+      user.department === "ADS" ||
+      user.role === "MARKETING" ||
+      user.department === "MARKETING" ||
+      user.actorType === "ADMIN" ||
+      user.actorType === "DIRECTOR" ||
+      user.role === "ADMIN" ||
+      user.role === "DIRECTOR";
+
+    if (!canViewAds) {
+      return forbiddenResponse(
+        "Quyền bị từ chối: Tài khoản thuộc bộ phận khác không được truy cập API dữ liệu phòng Quảng cáo (ADS)"
+      );
+    }
 
     const [campaigns, keywords] = await Promise.all([
       prisma.marketingCampaign.findMany({
@@ -62,7 +79,8 @@ export async function GET(req: NextRequest) {
         },
       },
     });
-  } catch (error: any) {
+  } catch (error) {
+    console.error("GET /api/campaigns error:", error);
     return NextResponse.json(
       { success: false, error: { code: "INTERNAL_ERROR", message: "Lỗi tải số liệu phân tích Ads" } },
       { status: 500 }
@@ -74,13 +92,10 @@ export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser(req);
     if (!user) {
-      return NextResponse.json(
-        { success: false, error: { code: "UNAUTHORIZED", message: "Vui lòng đăng nhập" } },
-        { status: 401 }
-      );
+      return unauthorizedResponse();
     }
 
-    // CHỈ 1 MÌNH ADS VÀ ADMIN CÓ QUYỀN UPLOAD / TẠO CHIẾN DỊCH
+    // CHỈ ADS, DIRECTOR VÀ ADMIN CÓ QUYỀN UPLOAD / TẠO CHIẾN DỊCH
     if (
       user.role !== "ADS" &&
       user.department !== "ADS" &&
@@ -89,15 +104,8 @@ export async function POST(req: NextRequest) {
       user.role !== "ADMIN" &&
       user.role !== "DIRECTOR"
     ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: "FORBIDDEN",
-            message: "Quyền bị từ chối: Chỉ nhân sự bộ phận ADS hoặc Ban Giám Đốc mới có quyền tạo và chỉnh sửa chiến dịch quảng cáo.",
-          },
-        },
-        { status: 403 }
+      return forbiddenResponse(
+        "Quyền bị từ chối: Chỉ nhân sự bộ phận ADS hoặc Ban Giám Đốc mới có quyền tạo và chỉnh sửa chiến dịch quảng cáo."
       );
     }
 
@@ -105,12 +113,36 @@ export async function POST(req: NextRequest) {
     const parsed = CreateCampaignSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { success: false, error: { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message || "Thông tin chiến dịch không hợp lệ" } },
+        {
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: parsed.error.issues[0]?.message || "Thông tin chiến dịch không hợp lệ",
+          },
+        },
         { status: 400 }
       );
     }
 
-    const generatedCode = parsed.data.code?.trim() || `TT-ADS-${Date.now().toString().slice(-6)}`;
+    const generatedCode = (
+      parsed.data.code?.trim() || `TT-ADS-${Date.now().toString().slice(-6)}`
+    ).toUpperCase();
+
+    const existing = await prisma.marketingCampaign.findUnique({
+      where: { code: generatedCode },
+    });
+    if (existing) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "DUPLICATE_CAMPAIGN_CODE",
+            message: `Mã chiến dịch "${generatedCode}" đã tồn tại trên hệ thống`,
+          },
+        },
+        { status: 409 }
+      );
+    }
 
     const campaign = await prisma.marketingCampaign.create({
       data: {
@@ -123,6 +155,21 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    await prisma.auditLog.create({
+      data: {
+        userId: user.userId,
+        action: "CREATE_CAMPAIGN",
+        entity: "CAMPAIGN",
+        entityId: campaign.id,
+        details: JSON.stringify({
+          code: campaign.code,
+          name: campaign.name,
+          platform: campaign.platform,
+          budget: campaign.budget,
+        }),
+      },
+    });
+
     return NextResponse.json(
       {
         success: true,
@@ -131,10 +178,10 @@ export async function POST(req: NextRequest) {
       },
       { status: 201 }
     );
-  } catch (error: any) {
+  } catch (error) {
     console.error("POST /api/campaigns error:", error);
     return NextResponse.json(
-      { success: false, error: { code: "INTERNAL_ERROR", message: error.message || "Lỗi tạo chiến dịch quảng cáo" } },
+      { success: false, error: { code: "INTERNAL_ERROR", message: "Lỗi tạo chiến dịch quảng cáo" } },
       { status: 500 }
     );
   }
