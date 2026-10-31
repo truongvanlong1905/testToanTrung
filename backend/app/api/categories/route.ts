@@ -1,30 +1,29 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getCurrentUser, unauthorizedResponse } from "@/lib/auth";
+import { NextRequest } from "next/server";
+import { listProductCategories } from "@/src/core/admin/categories.service";
+import { getCurrentUser, unauthorizedResponse } from "@/src/core/auth/auth";
+import { apiSuccess, getRequestId, handleRouteError } from "@/src/core/http";
+import { createLogger } from "@/src/core/logger";
 
 export const dynamic = "force-dynamic";
+const logger = createLogger("core-admin");
 
 export async function GET(req: NextRequest) {
+  const startTime = Date.now();
+  const requestId = getRequestId(req);
   const user = await getCurrentUser(req);
   if (!user) return unauthorizedResponse();
 
   try {
-    const categories = await prisma.productCategory.findMany({
-      orderBy: { name: "asc" },
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: { categories },
-    });
+    const data = await listProductCategories();
+    return apiSuccess(data);
   } catch (error) {
-    console.error("GET /api/categories error:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: { code: "INTERNAL_ERROR", message: "Lỗi tải danh mục sản phẩm" },
-      },
-      { status: 500 }
+    return handleRouteError(
+      error,
+      logger,
+      "GET /api/categories",
+      requestId,
+      startTime,
+      "Lỗi tải danh mục sản phẩm"
     );
   }
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyTokenAtEdge } from '@/lib/auth-edge'
-import { SESSION_COOKIE_NAME } from '@/lib/session-constants'
+import { verifyTokenAtEdge } from '@/src/core/auth/auth-edge'
+import { SESSION_COOKIE_NAME } from '@/src/core/auth/session-constants'
 
 /** Các path KHÔNG yêu cầu đăng nhập */
 const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/auth/register', '/api/health']

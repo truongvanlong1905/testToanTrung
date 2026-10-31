@@ -134,6 +134,5 @@ function cleanStaleNextDevLocks() {
 freeDevPorts([3001, 3002]);
 cleanStaleNextDevLocks();
 
+// Chỉ tạo Prisma Client types/runtime, KHÔNG tự động chạy db:push hoặc db:seed trên database nguồn (source.sqlite)
 execSync("npm run db:generate", { cwd: rootDir, stdio: "inherit", env });
-execSync("npm run db:push", { cwd: rootDir, stdio: "inherit", env });
-execSync("npm run db:seed --workspace @toantrung/database", { cwd: rootDir, stdio: "inherit", env });

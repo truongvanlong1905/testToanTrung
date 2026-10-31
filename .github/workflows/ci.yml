@@ -1,19 +1,21 @@
-name: Toàn Trung CRM — CI Build & Typecheck
+name: Toàn Trung CRM — CI Build, Architecture & Tests
 
 on:
   push:
     branches:
       - main
       - feat/gumloop-ui-redesign
+      - refactor/five-visible-modules
   pull_request:
     branches:
       - main
       - feat/gumloop-ui-redesign
+      - refactor/five-visible-modules
   workflow_dispatch:
 
 jobs:
   build-and-verify:
-    name: Build & Verify (Database + API + Web)
+    name: Verify Architecture, Tests, Typecheck & Build
     runs-on: ubuntu-latest
 
     steps:
@@ -29,14 +31,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Prepare Tailwind CSS & Prisma Client
+      - name: Prepare Prisma Client
         run: node scripts/predev.mjs
+
+      - name: Check 5-Module Architecture & Boundaries
+        run: node scripts/check-architecture.mjs
 
       - name: Typecheck Frontend & Backend
         run: |
           ./node_modules/.bin/tsc -p frontend/tsconfig.json --noEmit
           ./node_modules/.bin/tsc -p backend/tsconfig.json --noEmit
 
+      - name: Run Module & Integration Tests (Isolated Test DB)
+        run: node scripts/run-tests.mjs
+
       - name: Build Full-Stack Application (DB + API + Web)
         run: npm run build
-

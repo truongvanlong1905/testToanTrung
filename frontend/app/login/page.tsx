@@ -23,9 +23,9 @@ import {
   Megaphone,
   BarChart3,
 } from "lucide-react";
-import { useTheme } from "@/components/layout/ThemeProvider";
-import { ToanTrungLogo } from "@/components/shared/ToanTrungLogo";
-import { Button } from "@/components/ui/button";
+import { useTheme } from "@/src/core/layout/ThemeProvider";
+import { ToanTrungLogo } from "@/src/core/layout/ToanTrungLogo";
+import { Button } from "@/src/core/ui/button";
 
 interface BrandConfig {
   brandName: string;

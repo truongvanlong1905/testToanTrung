@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { execSync, spawn } from "node:child_process";
 import { getCloudEnv, rootDir } from "./cloud-env.mjs";
@@ -6,13 +7,17 @@ const env = getCloudEnv();
 const webPort = String(process.env.PORT || "3001");
 const apiPort = "3002";
 
-console.log("📦 Syncing SQLite database schema & core accounts...");
-execSync("npm run db:push", { cwd: rootDir, stdio: "inherit", env });
-execSync("npm run db:seed --workspace @toantrung/database", {
-  cwd: rootDir,
-  stdio: "inherit",
-  env,
-});
+if (!fs.existsSync(env.sqliteFilePath) || process.env.FORCE_DEMO_SEED === "true") {
+  console.log("📦 Initializing fresh SQLite database schema & demo accounts...");
+  execSync("npm run db:push", { cwd: rootDir, stdio: "inherit", env });
+  if (env.ALLOW_DEMO_SEED === "true") {
+    execSync("npm run db:seed --workspace @toantrung/database", {
+      cwd: rootDir,
+      stdio: "inherit",
+      env,
+    });
+  }
+}
 
 const isWin = process.platform === "win32";
 const npxBin = isWin ? "npx.cmd" : "npx";

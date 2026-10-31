@@ -1,40 +1,32 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser, unauthorizedResponse } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { NextRequest } from "next/server";
+import { getCurrentUser, unauthorizedResponse } from "@/src/core/auth/auth";
+import { apiSuccess, getRequestId, handleRouteError } from "@/src/core/http";
+import { createLogger } from "@/src/core/logger";
+import { markReportRead } from "@/src/modules/04-reports-dashboard/service";
+
+const logger = createLogger("04-reports-dashboard");
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startTime = Date.now();
+  const requestId = getRequestId(req);
   const { id } = await params;
   const user = await getCurrentUser(req);
-  if (!user) {
-    return unauthorizedResponse();
-  }
+  if (!user) return unauthorizedResponse();
 
   try {
-    const existingReport = await prisma.departmentReport.findUnique({
-      where: { id },
-      select: { id: true },
-    });
-    if (!existingReport) {
-      return NextResponse.json(
-        { success: false, error: { code: "NOT_FOUND", message: "Không tìm thấy báo cáo / thông báo" } },
-        { status: 404 }
-      );
-    }
-
-    await prisma.departmentReportRead.upsert({
-      where: { reportId_userId: { reportId: id, userId: user.userId } },
-      create: { reportId: id, userId: user.userId },
-      update: { readAt: new Date() },
-    });
-    return NextResponse.json({ success: true, data: { reportId: id, read: true } });
+    const data = await markReportRead(user, id);
+    return apiSuccess(data);
   } catch (error) {
-    console.error("PATCH /api/reports/[id]/read error:", error);
-    return NextResponse.json(
-      { success: false, error: { code: "INTERNAL_ERROR", message: "Không cập nhật được trạng thái thông báo" } },
-      { status: 500 }
+    return handleRouteError(
+      error,
+      logger,
+      "PATCH /api/reports/[id]/read",
+      requestId,
+      startTime,
+      "Không cập nhật được trạng thái thông báo"
     );
   }
 }

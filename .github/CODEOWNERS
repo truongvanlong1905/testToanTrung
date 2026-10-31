@@ -1,0 +1,37 @@
+# Toàn Trung CRM — CODEOWNERS
+# Sử dụng GitHub handle đã xác nhận từ repository origin (@truongvanlong1905)
+# Phân định rõ trách nhiệm cho Core/Database và 5 Module nghiệp vụ (M01 - M05)
+
+# Core Infrastructure, Database Schema & Scripts
+*                                       @truongvanlong1905
+/database/                              @truongvanlong1905
+/scripts/                               @truongvanlong1905
+/docs/                                  @truongvanlong1905
+/frontend/src/core/                     @truongvanlong1905
+/backend/src/core/                      @truongvanlong1905
+
+# M01: Quản lý Lead (Nhóm 1)
+/frontend/src/modules/01-leads/         @truongvanlong1905
+/backend/src/modules/01-leads/          @truongvanlong1905
+/docs/modules/01-leads/                 @truongvanlong1905
+
+# M02: Tracking & đồng bộ đa kênh (Nhóm 2)
+/frontend/src/modules/02-tracking/      @truongvanlong1905
+/backend/src/modules/02-tracking/       @truongvanlong1905
+/docs/modules/02-tracking/              @truongvanlong1905
+
+# M03: Ads & phân tích từ khóa (Nhóm 3)
+/frontend/src/modules/03-ads-keywords/  @truongvanlong1905
+/backend/src/modules/03-ads-keywords/   @truongvanlong1905
+/docs/modules/03-ads-keywords/          @truongvanlong1905
+
+# M04: Dashboard & báo cáo (Nhóm 4)
+/frontend/src/modules/04-reports-dashboard/ @truongvanlong1905
+/backend/src/modules/04-reports-dashboard/  @truongvanlong1905
+/docs/modules/04-reports-dashboard/         @truongvanlong1905
+
+# M05: AI hỗ trợ Design (Nhóm 5)
+/frontend/src/modules/05-ai-design/     @truongvanlong1905
+/backend/src/modules/05-ai-design/      @truongvanlong1905
+/docs/modules/05-ai-design/             @truongvanlong1905
+

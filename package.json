@@ -20,7 +20,10 @@
     "build:api": "npm run build --workspace @toantrung/api",
     "db:generate": "npm run db:generate --workspace @toantrung/database",
     "db:push": "npm run db:push --workspace @toantrung/database",
-    "db:save-test": "node database/scripts/export-test-data.mjs"
+    "db:save-test": "node database/scripts/export-test-data.mjs",
+    "check:arch": "node scripts/check-architecture.mjs",
+    "typecheck": "tsc -p frontend/tsconfig.json --noEmit && tsc -p backend/tsconfig.json --noEmit",
+    "test": "node scripts/run-tests.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
