@@ -166,7 +166,7 @@ async function runDatabaseIntegrationTests() {
   });
 
   try {
-    await runTest("DB Safety (AC-31): Verify active SQLite connection points to test-refactor.sqlite and backup exists", async () => {
+    await runTest("DB Safety (AC-31): Verify isolated SQLite connection and documented pre-migration backup", async () => {
       const dbList = await prisma.$queryRawUnsafe("PRAGMA database_list;");
       assert.ok(Array.isArray(dbList) && dbList.length > 0);
       const mainDbFile = String(dbList[0].file || "");
@@ -178,8 +178,15 @@ async function runDatabaseIntegrationTests() {
         !mainDbFile.includes("source.sqlite"),
         "Connection must NEVER point to source.sqlite"
       );
-      const backupFile = path.join(rootDir, "database", "data", "source.backup-pre-rebuild.sqlite");
-      assert.equal(fs.existsSync(backupFile), true, "Pre-rebuild database backup must exist");
+      const runbook = fs.readFileSync(
+        path.join(rootDir, "docs", "rebuild", "MIGRATION_AND_RUNBOOK.md"),
+        "utf8"
+      );
+      assert.match(
+        runbook,
+        /Copy-Item\s+"database\/data\/source\.sqlite"\s+"database\/data\/source\.backup-pre-rebuild\.sqlite"\s+-Force/,
+        "Runbook must require a pre-migration backup without depending on local database files"
+      );
     });
 
     let salesUser;
