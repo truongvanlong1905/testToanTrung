@@ -16,6 +16,7 @@ import {
   countTrackingEvents,
   createSyncJobRecord,
   createTrackingEventRecord,
+  findTrackingEventByEventKey,
   listSyncJobRecords,
   queryTrackingOverviewData,
 } from "./repository";
@@ -102,31 +103,51 @@ export async function recordTrackingEvent(input: {
   }
 
   const {
+    eventKey,
     websiteSource,
     source,
     medium,
     campaign,
     landingPage,
     device,
+    location,
+    contactChannel,
     utmParams,
     leadId,
   } = validation.data;
 
+  // Idempotency check by eventKey (AC-17)
+  if (eventKey) {
+    const existing = await findTrackingEventByEventKey(eventKey);
+    if (existing) {
+      return {
+        rateLimited: false as const,
+        idempotentDuplicate: true as const,
+        origin,
+        event: existing,
+      };
+    }
+  }
+
   const event = await createTrackingEventRecord({
-    websiteSource: websiteSource || "toantrungtelecom.com",
-    source: source || "direct",
-    medium: medium || "none",
+    eventKey: eventKey || null,
+    websiteSource: websiteSource || "Chưa có thông tin",
+    source: source || "Chưa có thông tin",
+    medium: medium || "Chưa có thông tin",
     campaign: campaign || null,
-    landingPage: landingPage || "/",
-    device: device || "Desktop",
+    landingPage: landingPage || "Chưa có thông tin",
+    device: device || "Chưa có thông tin",
+    location: location || null,
+    contactChannel: contactChannel || null,
     utmParams:
       typeof utmParams === "string" ? utmParams : JSON.stringify(utmParams || {}),
     leadId: leadId || null,
-    ipAddress: input.forwardedIp,
+    ipAddress: input.forwardedIp || null,
   });
 
   return {
     rateLimited: false as const,
+    idempotentDuplicate: false as const,
     origin,
     event,
   };
@@ -161,11 +182,10 @@ export async function executeSyncAction(
   }
 
   const connectorStatus = getExternalConnectorStatus(service);
-  const missing = connectorStatus.missingEnvKeys;
-  const status = missing.length ? "NOT_CONFIGURED" : "ERROR";
-  const errorMessage = missing.length
-    ? `Thiếu cấu hình: ${missing.join(", ")}`
-    : "Thông tin kết nối đã có nhưng adapter đồng bộ trực tiếp chưa được triển khai.";
+  const status = connectorStatus.isConfigured ? "ERROR" : "NOT_CONFIGURED";
+  const errorMessage = !connectorStatus.isConfigured
+    ? `Dịch vụ ${connectorStatus.label} chưa được cấu hình thông tin xác thực trên máy chủ.`
+    : "Thông tin kết nối đã có nhưng trình đồng bộ trực tiếp đang tạm ngưng.";
 
   const job = await createSyncJobRecord({
     service,
@@ -174,7 +194,7 @@ export async function executeSyncAction(
   });
 
   return {
-    httpStatus: missing.length ? 400 : 501,
+    httpStatus: !connectorStatus.isConfigured ? 400 : 501,
     status,
     errorMessage,
     job,

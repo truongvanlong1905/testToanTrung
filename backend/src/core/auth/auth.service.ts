@@ -1,4 +1,3 @@
-import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/src/core/db/prisma";
 import { isProduction } from "@/src/core/env";
@@ -19,16 +18,6 @@ import {
 const LoginSchema = z.object({
   email: z.string().email("Email không đúng định dạng"),
   password: z.string().min(1, "Vui lòng nhập mật khẩu"),
-});
-
-const RegisterSchema = z.object({
-  name: z.string().trim().min(2, "Họ và tên phải có ít nhất 2 ký tự").max(100),
-  email: z.string().trim().email("Địa chỉ Email / Gmail không hợp lệ"),
-  password: z.string().min(6, "Mật khẩu phải có ít nhất 6 ký tự").max(100),
-  phone: z.string().trim().max(20).optional().nullable(),
-  role: z.enum(["SALES", "MARKETING", "DESIGN", "ADS"]).default("SALES"),
-  address: z.string().trim().max(300).optional().nullable(),
-  hometown: z.string().trim().max(200).optional().nullable(),
 });
 
 const meProfileCache = new Map<string, { data: Record<string, unknown>; expiresAt: number }>();
@@ -104,7 +93,7 @@ export async function loginUser(
     recordFailedLoginAttempt(`email:${normalizedEmail}`);
     throw new AppError(
       401,
-      "Email hoặc mật khẩu không chính xác (hoặc tài khoản chưa được Admin kích hoạt)",
+      "Email hoặc mật khẩu không chính xác (hoặc tài khoản đã bị vô hiệu hóa)",
       "INVALID_CREDENTIALS"
     );
   }
@@ -217,9 +206,6 @@ export async function getMeProfile(session: UserSession | null) {
       initials: true,
       phone: true,
       avatar: true,
-      address: true,
-      hometown: true,
-      achievements: true,
       isActive: true,
     },
   });
@@ -251,100 +237,12 @@ export async function getMeProfile(session: UserSession | null) {
 }
 
 export async function registerUser(
-  body: unknown,
-  meta: { ip: string; userAgent?: string | null }
-) {
-  const rateCheck = checkLoginRateLimit(`register:${meta.ip}`);
-  if (!rateCheck.allowed) {
-    throw new AppError(
-      429,
-      `Bạn đã gửi quá nhiều yêu cầu đăng ký. Vui lòng thử lại sau ${rateCheck.waitMinutes} phút.`,
-      "TOO_MANY_REQUESTS"
-    );
-  }
-
-  const validation = RegisterSchema.safeParse(body);
-  if (!validation.success) {
-    throw new AppError(
-      400,
-      validation.error.issues[0]?.message || "Thông tin đăng ký không hợp lệ",
-      "VALIDATION_ERROR"
-    );
-  }
-
-  const { name, email, password, phone, role, address, hometown } = validation.data;
-  const normalizedEmail = email.toLowerCase();
-
-  const existingUser = await prisma.user.findUnique({
-    where: { email: normalizedEmail },
-  });
-
-  if (existingUser) {
-    recordFailedLoginAttempt(`register:${meta.ip}`);
-    throw new AppError(
-      400,
-      "Địa chỉ Email này đã được đăng ký. Vui lòng đăng nhập hoặc liên hệ Admin.",
-      "EMAIL_EXISTS"
-    );
-  }
-
-  const passwordHash = await bcrypt.hash(password, 10);
-
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  const initials =
-    words.length >= 2
-      ? `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase()
-      : name.substring(0, 2).toUpperCase() || "TT";
-
-  const newUser = await prisma.user.create({
-    data: {
-      name,
-      email: normalizedEmail,
-      passwordHash,
-      phone: phone || null,
-      role,
-      actorType: "USER",
-      department: role,
-      position: "Nhân viên",
-      initials,
-      address: address || null,
-      hometown: hometown || null,
-      isActive: false,
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      actorType: true,
-      department: true,
-      position: true,
-      initials: true,
-      isActive: true,
-    },
-  });
-
-  await prisma.auditLog.create({
-    data: {
-      userId: newUser.id,
-      action: "REGISTER_PENDING_APPROVAL",
-      entity: "AUTH",
-      entityId: newUser.id,
-      details: JSON.stringify({
-        email: newUser.email,
-        actorType: "USER",
-        department: newUser.department,
-        isActive: false,
-      }),
-      ipAddress: meta.ip,
-      userAgent: meta.userAgent || null,
-    },
-  });
-
-  return {
-    pendingApproval: true,
-    message:
-      "Đã gửi yêu cầu đăng ký tài khoản USER thành công! Vui lòng liên hệ Quản trị viên (ADMIN) để kích hoạt tài khoản và phân quyền phòng ban trước khi đăng nhập.",
-    user: newUser,
-  };
+  _body: unknown,
+  _meta: { ip: string; userAgent?: string | null }
+): Promise<never> {
+  throw new AppError(
+    403,
+    "Chức năng tự đăng ký tài khoản đã được khóa. Chỉ Quản trị viên (Admin) mới có quyền tạo và cấp tài khoản nhân sự.",
+    "PUBLIC_REGISTRATION_DISABLED"
+  );
 }

@@ -1,9 +1,8 @@
-﻿"use client";
+"use client";
 
 import React, { useDeferredValue, useMemo, useRef, useState } from "react";
 import {
   Upload,
-  Sparkles,
   CheckCircle2,
   AlertCircle,
   Users2,
@@ -26,14 +25,13 @@ interface ParsedImportRow {
   product: string;
   source: string;
   location: string;
-  estimatedValue: string;
 }
 
 const SAMPLE_IMPORT_ROWS = [
-  "Nguyễn Hoàng Nam\tTập đoàn Xây dựng Hòa Bình\t0908112233\tMàn hình LED P2.0 Hội trường 18m2\ttoantrungtelecom.com\tTP. Hồ Chí Minh\t385.000.000",
-  "Trần Thị Minh Châu\tTrung tâm Hội nghị White Palace\t0913445566\tMàn hình LED P2.5 Sân khấu chính\tledtoantrung.vn\tTP. Hồ Chí Minh\t240.000.000",
-  "Lê Quốc Bảo\tNgân hàng Á Châu (ACB - CN Đà Nẵng)\t0935778899\tHệ thống 12 Bảng điện tử Tỷ giá LED\ttoantrungtelecom.com\tĐà Nẵng\t145.000.000",
-  "Phạm Đức Thắng\tBệnh viện Đa khoa Quốc tế Hoàn Mỹ\t0979223344\tMàn hình LED P3 Outdoor Mặt tiền\tGoogle Ads\tBình Dương\t310.000.000",
+  "Nguyễn Hoàng Nam\tTập đoàn Xây dựng Hòa Bình\t0908112233\tMàn hình LED Hội trường\tWebsite\tTP. Hồ Chí Minh",
+  "Trần Thị Minh Châu\tTrung tâm Hội nghị White Palace\t0913445566\tMàn hình LED Sân khấu\tWebsite\tTP. Hồ Chí Minh",
+  "Lê Quốc Bảo\tNgân hàng Á Châu (ACB - CN Đà Nẵng)\t0935778899\tBảng Tỷ Giá Ngân Hàng\tGoogle Ads\tĐà Nẵng",
+  "Phạm Đức Thắng\tBệnh viện Đa khoa Quốc tế Hoàn Mỹ\t0979223344\tMàn hình LED Ngoài trời\tGoogle Ads\tBình Dương",
 ].join("\n");
 
 function splitSmartLine(line: string): string[] {
@@ -64,15 +62,12 @@ function parseRawLeadText(raw: string): ParsedImportRow[] {
     if (idx === 0 && isLikelyHeaderRow(cols)) return;
     if (cols.length < 2) return;
 
-    // Support flexible 2..7 column paste:
-    // [0] Tên KH | [1] Công ty (or SĐT if 2-3 cols) | [2] SĐT | [3] Sản phẩm | [4] Nguồn | [5] Khu vực | [6] Dự toán
     const customerName = cols[0] || "";
-    let companyName = "Khách hàng doanh nghiệp";
+    let companyName = "";
     let phone = "";
-    let product = "Tư vấn màn hình LED Toàn Trung";
+    let product = "Chưa xác định";
     let source = "Website";
-    let location = "TP. Hồ Chí Minh";
-    let estimatedValue = "Đang khảo sát";
+    let location = "";
 
     const secondDigits = (cols[1] || "").replace(/\D/g, "");
     if (secondDigits.length >= 8 && cols.length <= 4) {
@@ -85,7 +80,6 @@ function parseRawLeadText(raw: string): ParsedImportRow[] {
       product = cols[3] || product;
       source = cols[4] || source;
       location = cols[5] || location;
-      estimatedValue = cols[6] || estimatedValue;
     }
 
     const cleanDigits = phone.replace(/\D/g, "");
@@ -97,7 +91,6 @@ function parseRawLeadText(raw: string): ParsedImportRow[] {
         product,
         source,
         location,
-        estimatedValue,
       });
     }
   });
@@ -163,8 +156,8 @@ export const ImportLeadsModal = React.memo(function ImportLeadsModal({
       setImportResult(json.data);
       setRawText("");
       onImported(json.message || `Đã import ${json.data?.importedCount || 0} Lead thành công!`);
-    } catch (err: any) {
-      setErrorMsg(err.message || "Không thể import danh sách Lead");
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Không thể import danh sách Lead");
     } finally {
       setIsSubmitting(false);
     }
@@ -177,14 +170,13 @@ export const ImportLeadsModal = React.memo(function ImportLeadsModal({
       preventClose={isSubmitting}
       size="xl"
       icon={<Upload className="w-4 h-4" />}
-      title="Import Lead Hàng loạt & Chia Sales Tự động (Round-Robin)"
-      description="Đồng bộ nhanh danh sách khách hàng từ toantrungtelecom.com, ledtoantrung.vn, Facebook Lead Ads hoặc Excel mà không cần can thiệp mã nguồn website cũ."
+      title="Import Lead Hàng loạt & Chia Sales Tự động"
+      description="Đồng bộ danh sách khách hàng từ file Excel / CSV và phân bổ đều cho đội ngũ kinh doanh."
       footer={
         <div className="flex items-center justify-between gap-3">
           <div className="text-xs text-slate-500">
             Hợp lệ:{" "}
-            <strong className="text-slate-900 kpi-number">{parsedRows.length}</strong> dòng · Tự
-            động gán SLA gọi trong <strong>2 giờ</strong>
+            <strong className="text-slate-900 kpi-number">{parsedRows.length}</strong> dòng
           </div>
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="md" onClick={onClose} disabled={isSubmitting}>
@@ -216,7 +208,7 @@ export const ImportLeadsModal = React.memo(function ImportLeadsModal({
             </div>
             {Object.keys(importResult.assignmentSummary).length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                <span className="text-emerald-800 font-medium">Phân bổ Round-Robin cho Sales:</span>
+                <span className="text-emerald-800 font-medium">Phân bổ cho Sales:</span>
                 {Object.entries(importResult.assignmentSummary).map(([salesName, cnt]) => (
                   <span
                     key={salesName}
@@ -260,14 +252,13 @@ export const ImportLeadsModal = React.memo(function ImportLeadsModal({
               type="button"
               variant="subtle"
               size="sm"
-              leftIcon={<Sparkles className="w-3.5 h-3.5" />}
               onClick={() => {
                 setRawText(SAMPLE_IMPORT_ROWS);
                 setImportResult(null);
                 setErrorMsg(null);
               }}
             >
-              Điền 4 dự án LED mẫu để chạy thử
+              Điền 4 dòng dữ liệu mẫu
             </Button>
           </div>
 
@@ -279,21 +270,21 @@ export const ImportLeadsModal = React.memo(function ImportLeadsModal({
               className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
             />
             <Users2 className="w-3.5 h-3.5 text-blue-600" />
-            <span>Chia đều Round-Robin cho đội Sales</span>
+            <span>Chia đều cho đội Sales</span>
           </label>
         </div>
 
         {/* Paste Textarea */}
         <div>
           <label htmlFor="bulk-lead-paste" className="crm-label text-xs">
-            Dán trực tiếp từ Excel / Google Sheets (Thứ tự cột: Tên KH | Công ty | SĐT | Sản phẩm LED | Nguồn | Khu vực | Dự toán)
+            Dán trực tiếp từ Excel / Google Sheets (Thứ tự cột: Tên KH | Công ty | SĐT | Sản phẩm | Nguồn | Khu vực)
           </label>
           <textarea
             id="bulk-lead-paste"
             rows={5}
             value={rawText}
             onChange={(e) => setRawText(e.target.value)}
-            placeholder="Nguyễn Hoàng Nam | Tập đoàn Hòa Bình | 0908112233 | Màn hình LED P2.0 Hội trường | toantrungtelecom.com | TP. Hồ Chí Minh | 385.000.000"
+            placeholder="Nguyễn Hoàng Nam | Tập đoàn Hòa Bình | 0908112233 | Màn hình LED Hội trường | Website | TP. Hồ Chí Minh"
             className="crm-textarea font-mono text-xs"
           />
         </div>
@@ -316,22 +307,20 @@ export const ImportLeadsModal = React.memo(function ImportLeadsModal({
                     <th>Khách hàng</th>
                     <th>Đơn vị</th>
                     <th>SĐT</th>
-                    <th>Hạng mục LED</th>
+                    <th>Sản phẩm quan tâm</th>
                     <th>Nguồn</th>
-                    <th className="num">Dự toán</th>
+                    <th>Khu vực</th>
                   </tr>
                 </thead>
                 <tbody>
                   {parsedRows.slice(0, 20).map((row, idx) => (
                     <tr key={`${row.phone}-${idx}`}>
                       <td className="py-2 px-3 font-semibold text-slate-900">{row.customerName}</td>
-                      <td className="py-2 px-3 text-slate-600">{row.companyName}</td>
+                      <td className="py-2 px-3 text-slate-600">{row.companyName || "—"}</td>
                       <td className="py-2 px-3 font-mono text-slate-700">{row.phone}</td>
                       <td className="py-2 px-3 text-slate-700">{row.product}</td>
                       <td className="py-2 px-3 text-slate-500">{row.source}</td>
-                      <td className="num py-2 px-3 font-semibold text-slate-900 kpi-number">
-                        {row.estimatedValue}
-                      </td>
+                      <td className="py-2 px-3 text-slate-500">{row.location || "—"}</td>
                     </tr>
                   ))}
                 </tbody>

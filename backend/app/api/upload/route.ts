@@ -2,9 +2,49 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/src/core/auth/auth";
 import { AppError, apiSuccess, getRequestId } from "@/src/core/http";
 import { createLogger } from "@/src/core/logger";
-import { handleFileUpload } from "@/src/core/storage/upload.service";
+import {
+  handleFileUpload,
+  verifyAttachmentAccess,
+} from "@/src/core/storage/upload.service";
 
 const logger = createLogger("core-storage");
+
+export async function GET(req: NextRequest) {
+  const startTime = Date.now();
+  const requestId = getRequestId(req);
+  try {
+    const user = await getCurrentUser(req);
+    const { searchParams } = new URL(req.url);
+    const attachmentId = searchParams.get("attachmentId");
+    const fileUrl = searchParams.get("fileUrl");
+    const result = await verifyAttachmentAccess(user, { attachmentId, fileUrl });
+
+    logger.info({
+      requestId,
+      action: "GET /api/upload",
+      durationMs: Date.now() - startTime,
+      status: 200,
+    });
+    return apiSuccess(result);
+  } catch (error) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: error.errorCode, message: error.message },
+        },
+        { status: error.status }
+      );
+    }
+    return NextResponse.json(
+      {
+        success: false,
+        error: { code: "UPLOAD_ERROR", message: "Lỗi kiểm tra tệp đính kèm" },
+      },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();

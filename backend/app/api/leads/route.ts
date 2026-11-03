@@ -19,6 +19,10 @@ export async function GET(req: NextRequest) {
       status: searchParams.get("status"),
       source: searchParams.get("source"),
       salesId: searchParams.get("salesId"),
+      categoryId: searchParams.get("categoryId"),
+      demandType: searchParams.get("demandType"),
+      from: searchParams.get("from"),
+      to: searchParams.get("to"),
       page: searchParams.get("page"),
       pageSize: searchParams.get("pageSize"),
     });

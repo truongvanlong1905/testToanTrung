@@ -7,7 +7,7 @@ export async function queryVisibleReports(
   return prisma.departmentReport.findMany({
     where: reportFilter,
     include: {
-      createdBy: { select: { name: true, role: true, initials: true } },
+      createdBy: { select: { name: true, role: true, actorType: true, initials: true } },
       reads: { where: { userId }, select: { id: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -41,7 +41,11 @@ export async function createDepartmentReportRecord(data: {
 export async function findReportById(id: string) {
   return prisma.departmentReport.findUnique({
     where: { id },
-    select: { id: true },
+    include: {
+      createdBy: {
+        select: { id: true, name: true, role: true, actorType: true, initials: true },
+      },
+    },
   });
 }
 

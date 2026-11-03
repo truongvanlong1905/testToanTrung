@@ -1,35 +1,38 @@
-﻿"use client";
+"use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
   Plus,
+  Pencil,
   AlertCircle,
   Upload,
   FileText,
   AlertTriangle,
   Loader2,
-  Sparkles,
-  Zap,
-  ChevronDown,
-  ChevronUp,
-  CheckCircle2,
+  UserCheck,
 } from "lucide-react";
-import { Lead } from "../types";
-import { SALES_LIST } from "../types";
+import {
+  Lead,
+  LeadStatus,
+  ProductCatalogOption,
+  OFFICIAL_CATALOG_FALLBACK,
+  OFFICIAL_DEMAND_TYPES,
+  OFFICIAL_CONTACT_CHANNELS,
+  SOURCE_LIST,
+  STATUS_LIST,
+  SALES_LIST,
+} from "../types";
 import { Button } from "@/src/core/ui/button";
-import { StatusBadge } from "@/src/core/ui/badge";
 import { lockBodyScroll, unlockBodyScroll, recordModalOpenMetric } from "@/src/core/ui/modal";
 import { peekSharedJson, sharedGetJson } from "@/src/core/http/shared-fetch";
-import { AiLeadDraft } from "./AiQuickLeadBar";
 
 interface NewLeadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddLead: (newLead: Lead) => void;
-  initialDraft?: AiLeadDraft | null;
-  initialWarning?: string | null;
+  onAddLead: (savedLead: Lead) => void;
+  editingLead?: Lead | null;
 }
 
 interface DuplicateLeadMatch {
@@ -48,45 +51,6 @@ interface SalesUserOption {
   initials: string;
 }
 
-const QUICK_PRODUCT_PRESETS = [
-  {
-    chip: "LED P2.5 Hội trường (18m²)",
-    product: "Màn hình LED P2.5 Indoor Hội trường & Sân khấu (4.8m × 3.75m = 18m²)",
-    category: "LED trong nhà",
-    estimatedValue: "318.500.000 đ",
-    ledModuleType: "LED P2.5 Indoor Hội trường & Tiệc cưới",
-    ledWidth: 4.8,
-    ledHeight: 3.75,
-  },
-  {
-    chip: "LED P1.86 Phòng họp VIP (8m²)",
-    product: "Màn hình LED P1.86 Indoor Phòng họp VIP (3.84m × 2.16m = 8.3m²)",
-    category: "LED trong nhà",
-    estimatedValue: "228.000.000 đ",
-    ledModuleType: "LED P1.86 Indoor Phòng họp VIP (Cabinet nhôm đúc)",
-    ledWidth: 3.84,
-    ledHeight: 2.16,
-  },
-  {
-    chip: "LED P3.0 Outdoor Mặt tiền (24m²)",
-    product: "Màn hình LED P3.0 Outdoor Mặt tiền Tòa nhà IP65 (6m × 4m = 24m²)",
-    category: "LED ngoài trời",
-    estimatedValue: "495.000.000 đ",
-    ledModuleType: "LED P3.0 Outdoor Mặt tiền Tòa nhà (Chống nước IP65)",
-    ledWidth: 6,
-    ledHeight: 4,
-  },
-  {
-    chip: "Bảng điện tử Tỷ giá / Ma trận",
-    product: "Hệ thống Bảng điện tử LED Ma trận / Hiển thị thông tin (8m²)",
-    category: "Bảng điện tử",
-    estimatedValue: "92.500.000 đ",
-    ledModuleType: "Bảng điện tử LED Ma trận / Tỷ giá Ngân hàng",
-    ledWidth: 4,
-    ledHeight: 2,
-  },
-];
-
 function getInitialSalesUsers(): SalesUserOption[] {
   const cached = peekSharedJson("/api/users?role=SALES", 60_000);
   if (cached?.success && Array.isArray(cached.data?.users) && cached.data.users.length > 0) {
@@ -99,220 +63,156 @@ function getInitialSalesUsers(): SalesUserOption[] {
   return SALES_LIST;
 }
 
-interface AiSmartPasteSectionProps {
-  selectedSalesId?: string;
-  onParsedDraft: (draft: AiLeadDraft) => void;
-  onInstantCreated: (lead: Lead) => void;
-  onError: (message: string | null) => void;
+function getInitialCatalogItems(): ProductCatalogOption[] {
+  const cached = peekSharedJson("/api/categories", 60_000);
+  if (cached?.success && Array.isArray(cached.data?.categories)) {
+    const officialCats: ProductCatalogOption[] = cached.data.categories.filter(
+      (c: ProductCatalogOption) => c.group === "LED_SCREEN" || c.group === "ELECTRONIC_BOARD"
+    );
+    if (officialCats.length > 0) return officialCats;
+  }
+  return OFFICIAL_CATALOG_FALLBACK;
 }
 
-/**
- * Isolated AI Smart Paste Box: typing inside this textarea only re-renders this small box,
- * never forcing the 15 form fields below to re-render on each keystroke.
- */
-const AiSmartPasteSection = React.memo(function AiSmartPasteSection({
-  selectedSalesId,
-  onParsedDraft,
-  onInstantCreated,
-  onError,
-}: AiSmartPasteSectionProps) {
-  const [aiRawInput, setAiRawInput] = useState("");
-  const [isAiParsing, setIsAiParsing] = useState(false);
-  const [isAiQuickCreating, setIsAiQuickCreating] = useState(false);
+function buildInitialFormData(
+  editingLead: Lead | null,
+  catalogItems: ProductCatalogOption[],
+  salesUsers: SalesUserOption[]
+) {
+  if (editingLead) {
+    const matchedCatalog = catalogItems.find(
+      (c) =>
+        c.code === editingLead.categoryCode ||
+        c.name.toLowerCase() === (editingLead.product || "").toLowerCase() ||
+        c.name.toLowerCase() === (editingLead.category || "").toLowerCase()
+    );
+    const inferredGroup =
+      matchedCatalog?.group === "ELECTRONIC_BOARD" ||
+      editingLead.productGroup === "ELECTRONIC_BOARD" ||
+      (editingLead.category || "").toLowerCase().includes("bảng")
+        ? "ELECTRONIC_BOARD"
+        : "LED_SCREEN";
 
-  const handleAiParseIntoForm = async () => {
-    if (!aiRawInput.trim()) {
-      onError("Vui lòng dán tin nhắn Zalo / Email / ghi chú khách hàng vào ô AI.");
-      return;
-    }
-    setIsAiParsing(true);
-    onError(null);
-    try {
-      const res = await fetch("/api/leads/ai-assist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "PARSE_RAW_TEXT",
-          rawText: aiRawInput.trim(),
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success || !json.data?.parsed) {
-        throw new Error(json.error?.message || "AI không thể bóc tách nội dung");
-      }
-      onParsedDraft(json.data.parsed as AiLeadDraft);
-    } catch (err: unknown) {
-      onError(err instanceof Error ? err.message : "Lỗi kết nối AI bóc tách");
-    } finally {
-      setIsAiParsing(false);
-    }
+    return {
+      customerName: editingLead.customerName || "",
+      companyName: editingLead.companyName || "",
+      phone: editingLead.phone || "",
+      email: editingLead.email || "",
+      productGroup: inferredGroup,
+      categoryCode: matchedCatalog?.code || editingLead.categoryCode || "",
+      product:
+        editingLead.product && editingLead.product !== "Chưa xác định"
+          ? editingLead.product
+          : matchedCatalog?.name || "",
+      productCustomText: editingLead.productCustomText || "",
+      demandType: editingLead.demandType || "Chưa xác định",
+      source: editingLead.source || "Hotline",
+      contactChannel: editingLead.contactChannel || "Hotline",
+      status: (editingLead.status || "Vừa nhận thông tin") as LeadStatus,
+      failureReason: editingLead.failureReason || "",
+      hasCustomerResponded: Boolean(editingLead.customerRespondedAt),
+      customerResponseNote: editingLead.customerResponseNote || "",
+      salesPersonId: editingLead.salesPerson?.id || editingLead.salesPersonId || "",
+      transferToOtherSales: false,
+      targetSalesPersonId: "",
+      transferReason: "",
+      installationAddress: editingLead.installationAddress || "",
+      location: editingLead.location || "",
+      notes: editingLead.notes || "",
+    };
+  }
+
+  return {
+    customerName: "",
+    companyName: "",
+    phone: "",
+    email: "",
+    productGroup: "LED_SCREEN",
+    categoryCode: "",
+    product: "",
+    productCustomText: "",
+    demandType: "Chưa xác định",
+    source: "Hotline",
+    contactChannel: "Hotline",
+    status: "Vừa nhận thông tin" as LeadStatus,
+    failureReason: "",
+    hasCustomerResponded: false,
+    customerResponseNote: "",
+    salesPersonId: salesUsers[0]?.id || "",
+    transferToOtherSales: false,
+    targetSalesPersonId: "",
+    transferReason: "",
+    installationAddress: "",
+    location: "",
+    notes: "",
   };
-
-  const handleAiInstantCreate = async () => {
-    if (!aiRawInput.trim()) {
-      onError("Vui lòng dán tin nhắn khách hàng vào ô AI để tạo thẳng.");
-      return;
-    }
-    setIsAiQuickCreating(true);
-    onError(null);
-    try {
-      const res = await fetch("/api/leads/ai-assist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "QUICK_CREATE",
-          rawText: aiRawInput.trim(),
-          salesPersonId: selectedSalesId || undefined,
-        }),
-      });
-      const json = await res.json();
-
-      if (res.status === 422 && json.data?.parsed) {
-        onParsedDraft(json.data.parsed as AiLeadDraft);
-        onError(json.error?.message || "Vui lòng bổ sung số điện thoại để hoàn tất.");
-        return;
-      }
-
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Không thể tạo nhanh Lead bằng AI");
-      }
-
-      onInstantCreated(json.data.lead as Lead);
-    } catch (err: unknown) {
-      onError(err instanceof Error ? err.message : "Lỗi khởi tạo nhanh bằng AI");
-    } finally {
-      setIsAiQuickCreating(false);
-    }
-  };
-
-  return (
-    <div className="p-3.5 rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50/70 to-violet-50/40 space-y-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-blue-900 flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-          Gõ tắt không dấu hoặc dán tin nhắn Zalo (AI tự đọc &amp; phân chia nhanh)
-        </span>
-        <button
-          type="button"
-          onClick={() => setAiRawInput("truong van long 0926471382 led p2.5 2x3")}
-          className="text-[11px] font-medium text-blue-600 hover:underline cursor-pointer"
-        >
-          Dán ví dụ gõ tắt
-        </button>
-      </div>
-      <textarea
-        rows={2}
-        value={aiRawInput}
-        onChange={(e) => setAiRawInput(e.target.value)}
-        placeholder="VD: truong van long 0926471382 led p2.5 2x3 (hoặc dán nguyên tin nhắn Zalo / Email khách hàng...)"
-        className="crm-textarea text-xs bg-white resize-none py-2"
-      />
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          isLoading={isAiParsing}
-          disabled={isAiQuickCreating}
-          leftIcon={<Sparkles className="w-3.5 h-3.5 text-blue-600" />}
-          onClick={() => void handleAiParseIntoForm()}
-          className="bg-white"
-        >
-          AI Bóc tách điền vào Form
-        </Button>
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          isLoading={isAiQuickCreating}
-          disabled={isAiParsing}
-          leftIcon={<Zap className="w-3.5 h-3.5" />}
-          onClick={() => void handleAiInstantCreate()}
-        >
-          AI Tạo thẳng Lead &amp; Đóng
-        </Button>
-      </div>
-    </div>
-  );
-});
+}
 
 export const NewLeadModal = React.memo(function NewLeadModal({
   isOpen,
   onClose,
   onAddLead,
-  initialDraft,
-  initialWarning,
+  editingLead = null,
 }: NewLeadModalProps) {
+  const isEditing = Boolean(editingLead);
   const [salesList, setSalesList] = useState<SalesUserOption[]>(getInitialSalesUsers);
+  const [catalogItems, setCatalogItems] = useState<ProductCatalogOption[]>(
+    getInitialCatalogItems
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [aiBannerSummary, setAiBannerSummary] = useState<string | null>(null);
-  const [showAdvancedFields, setShowAdvancedFields] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  const [formData, setFormData] = useState(() => {
-    const initialSales = getInitialSalesUsers();
-    return {
-      customerName: "",
-      companyName: "",
-      phone: "",
-      email: "",
-      product: "",
-      category: "LED trong nhà",
-      source: "Hotline",
-      salesPersonName: initialSales[0]?.name || SALES_LIST[0].name,
-      salesPersonId: initialSales[0]?.id || "",
-      estimatedValue: "",
-      installationAddress: "",
-      location: "TP. Hồ Chí Minh",
-      notes: "",
-      ledModuleType: null as string | null,
-      ledWidth: null as number | null,
-      ledHeight: null as number | null,
-    };
-  });
+  const onCloseRef = useRef(onClose);
+  const isSubmittingRef = useRef(isSubmitting);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    isSubmittingRef.current = isSubmitting;
+  }, [onClose, isSubmitting]);
+
+  const [formData, setFormData] = useState(() =>
+    buildInitialFormData(editingLead, getInitialCatalogItems(), getInitialSalesUsers())
+  );
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateLeadMatch[]>([]);
 
   const [attachments, setAttachments] = useState<
     Array<{ fileName: string; fileUrl: string; fileSize?: number; fileType: string }>
-  >([]);
+  >(() =>
+    (editingLead?.attachments || []).map((a) => ({
+      fileName: a.fileName,
+      fileUrl: a.fileUrl,
+      fileSize: a.fileSize,
+      fileType: a.fileType,
+    }))
+  );
   const [isUploading, setIsUploading] = useState(false);
 
-  // Apply initialDraft whenever opened from AiQuickLeadBar
+  const prevOpenIdentityRef = useRef<string>(
+    `${isOpen}-${editingLead?.id || "new"}`
+  );
+
+  // Populate form only when switching open/editingLead identity
   useEffect(() => {
-    if (isOpen && initialDraft) {
-      setFormData((prev) => ({
-        ...prev,
-        customerName: initialDraft.customerName || prev.customerName,
-        companyName: initialDraft.companyName || prev.companyName,
-        phone: initialDraft.phone || prev.phone,
-        email: initialDraft.email || prev.email,
-        product: initialDraft.product || prev.product,
-        category: initialDraft.categoryName || prev.category,
-        source: initialDraft.source || prev.source,
-        location: initialDraft.location || prev.location,
-        installationAddress: initialDraft.installationAddress || prev.installationAddress,
-        estimatedValue: initialDraft.estimatedValue || prev.estimatedValue,
-        notes: initialDraft.notes || prev.notes,
-        ledModuleType: initialDraft.ledModuleType ?? null,
-        ledWidth: initialDraft.ledWidth ?? null,
-        ledHeight: initialDraft.ledHeight ?? null,
-      }));
-      setAiBannerSummary(
-        initialDraft.aiSummary || "AI đã tự động bóc tách và điền sẵn các trường thông tin."
-      );
-      if (initialDraft.email || initialDraft.installationAddress || initialDraft.notes) {
-        setShowAdvancedFields(true);
-      }
-    }
-    if (isOpen && initialWarning) {
-      setServerError(initialWarning);
-    } else if (isOpen && !initialWarning) {
-      setServerError(null);
-    }
-  }, [isOpen, initialDraft, initialWarning]);
+    if (!isOpen) return;
+    const nextIdentity = `${isOpen}-${editingLead?.id || "new"}`;
+    if (prevOpenIdentityRef.current === nextIdentity) return;
+    prevOpenIdentityRef.current = nextIdentity;
+
+    setErrors({});
+    setServerError(null);
+    setDuplicateMatches([]);
+    setFormData(buildInitialFormData(editingLead, catalogItems, salesList));
+    setAttachments(
+      (editingLead?.attachments || []).map((a) => ({
+        fileName: a.fileName,
+        fileUrl: a.fileUrl,
+        fileSize: a.fileSize,
+        fileType: a.fileType,
+      }))
+    );
+  }, [isOpen, editingLead, catalogItems, salesList]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -320,7 +220,7 @@ export const NewLeadModal = React.memo(function NewLeadModal({
     const openStartMs = typeof performance !== "undefined" ? performance.now() : 0;
     const previousFocused = document.activeElement as HTMLElement | null;
     lockBodyScroll();
-    recordModalOpenMetric("Thêm Lead nhanh với Trợ lý AI", openStartMs);
+    recordModalOpenMetric(isEditing ? "Chỉnh sửa Lead" : "Thêm Lead mới", openStartMs);
 
     const rafId = requestAnimationFrame(() => {
       const firstInput = document.getElementById("nl-customer");
@@ -328,40 +228,50 @@ export const NewLeadModal = React.memo(function NewLeadModal({
     });
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !isSubmitting) {
+      if (event.key === "Escape" && !isSubmittingRef.current) {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
 
-    // Only fetch sales users if not already populated with real DB IDs
     let active = true;
-    sharedGetJson("/api/users?role=SALES", 60_000)
-      .then(({ ok, payload }) => {
-        if (!active || !ok || !payload?.success || !Array.isArray(payload.data?.users)) return;
-        const users: SalesUserOption[] = payload.data.users.map((u: SalesUserOption) => ({
-          id: u.id,
-          name: u.name,
-          initials: u.initials,
-        }));
-        if (users.length > 0) {
-          setSalesList((prev) => (prev[0]?.id === users[0]?.id && prev.length === users.length ? prev : users));
-          setFormData((prev) =>
-            prev.salesPersonId
-              ? prev
-              : {
-                  ...prev,
-                  salesPersonId: users[0].id || "",
-                  salesPersonName: users[0].name,
-                }
+    const fetchTimer = window.setTimeout(() => {
+      sharedGetJson("/api/users?role=SALES", 60_000)
+        .then(({ ok, payload }) => {
+          if (!active || !ok || !payload?.success || !Array.isArray(payload.data?.users)) return;
+          const users: SalesUserOption[] = payload.data.users.map((u: SalesUserOption) => ({
+            id: u.id,
+            name: u.name,
+            initials: u.initials,
+          }));
+          if (users.length > 0) {
+            setSalesList(users);
+            setFormData((prev) => ({
+              ...prev,
+              salesPersonId: prev.salesPersonId || users[0].id || "",
+              targetSalesPersonId: prev.targetSalesPersonId || users[0].id || "",
+            }));
+          }
+        })
+        .catch(() => {});
+
+      sharedGetJson("/api/categories", 60_000)
+        .then(({ ok, payload }) => {
+          if (!active || !ok || !payload?.success || !Array.isArray(payload.data?.categories)) return;
+          const officialCats: ProductCatalogOption[] = payload.data.categories.filter(
+            (c: ProductCatalogOption) => c.group === "LED_SCREEN" || c.group === "ELECTRONIC_BOARD"
           );
-        }
-      })
-      .catch(() => {});
+          if (officialCats.length > 0) {
+            setCatalogItems(officialCats);
+          }
+        })
+        .catch(() => {});
+    }, 170);
 
     return () => {
       active = false;
+      window.clearTimeout(fetchTimer);
       cancelAnimationFrame(rafId);
       document.removeEventListener("keydown", handleKeyDown);
       unlockBodyScroll();
@@ -373,9 +283,9 @@ export const NewLeadModal = React.memo(function NewLeadModal({
         }
       }
     };
-  }, [isOpen, isSubmitting, onClose]);
+  }, [isOpen, isEditing]);
 
-  // Debounced duplicate check with minimum length threshold + AbortController (zero wasted renders)
+  // Real-time full-DB duplicate check
   useEffect(() => {
     if (!isOpen) return;
     const phoneDigits = formData.phone.replace(/\D/g, "");
@@ -398,6 +308,7 @@ export const NewLeadModal = React.memo(function NewLeadModal({
             phone: formData.phone,
             customerName: cleanName,
             companyName: cleanCompany,
+            excludeLeadId: editingLead?.id,
           }),
         });
         if (res.ok && !controller.signal.aborted) {
@@ -411,50 +322,25 @@ export const NewLeadModal = React.memo(function NewLeadModal({
       } catch {
         // ignore aborted or network check error
       }
-    }, 420);
+    }, 380);
 
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [isOpen, formData.phone, formData.customerName, formData.companyName]);
-
-  const handleParsedDraft = useCallback((p: AiLeadDraft) => {
-    setFormData((prev) => ({
-      ...prev,
-      customerName: p.customerName || prev.customerName,
-      companyName: p.companyName || prev.companyName,
-      phone: p.phone || prev.phone,
-      email: p.email || prev.email,
-      product: p.product || prev.product,
-      category: p.categoryName || prev.category,
-      source: p.source || prev.source,
-      location: p.location || prev.location,
-      installationAddress: p.installationAddress || prev.installationAddress,
-      estimatedValue: p.estimatedValue || prev.estimatedValue,
-      notes: p.notes || prev.notes,
-      ledModuleType: p.ledModuleType ?? null,
-      ledWidth: p.ledWidth ?? null,
-      ledHeight: p.ledHeight ?? null,
-    }));
-    setAiBannerSummary(p.aiSummary || "Đã bóc tách thông tin & tính dự toán LED tự động!");
-    setErrors({});
-    if (p.email || p.installationAddress) setShowAdvancedFields(true);
-  }, []);
-
-  const handleInstantCreated = useCallback(
-    (lead: Lead) => {
-      onAddLead(lead);
-      onClose();
-    },
-    [onAddLead, onClose]
-  );
+  }, [isOpen, formData.phone, formData.customerName, formData.companyName, editingLead?.id]);
 
   if (!isOpen || typeof document === "undefined") return null;
 
-  const selectedSalesObj = salesList.find(
-    (s) => s.name === formData.salesPersonName || (s.id && s.id === formData.salesPersonId)
+  const groupProducts = catalogItems.filter((c) => c.group === formData.productGroup);
+  const selectedProductObj = catalogItems.find(
+    (c) => c.code === formData.categoryCode || c.name === formData.product
   );
+  const requiresCustomProductText =
+    Boolean(selectedProductObj?.allowCustomText) ||
+    formData.categoryCode === "LED_OTHER" ||
+    formData.categoryCode === "BOARD_OTHER" ||
+    formData.product.toLowerCase().includes("khác");
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -468,6 +354,9 @@ export const NewLeadModal = React.memo(function NewLeadModal({
         const file = files[i];
         const data = new FormData();
         data.append("file", file);
+        if (editingLead?.id) {
+          data.append("leadId", editingLead.id);
+        }
 
         const res = await fetch("/api/upload", {
           method: "POST",
@@ -501,13 +390,29 @@ export const NewLeadModal = React.memo(function NewLeadModal({
 
     const errs: Record<string, string> = {};
     if (!formData.customerName.trim()) {
-      errs.customerName = "Vui lòng nhập tên người liên hệ.";
+      errs.customerName = "Vui lòng nhập tên khách hàng liên hệ.";
     }
     if (!formData.phone.trim()) {
       errs.phone = "Vui lòng nhập số điện thoại.";
+    } else if (formData.phone.replace(/\D/g, "").length < 8) {
+      errs.phone = "Số điện thoại cần tối thiểu 8 chữ số.";
     }
-    if (!formData.product.trim()) {
-      errs.product = "Vui lòng nhập hoặc bấm chọn nhanh sản phẩm LED.";
+
+    if (requiresCustomProductText && !formData.productCustomText.trim()) {
+      errs.productCustomText = "Vui lòng nhập mô tả sản phẩm khi chọn mục 'Khác'.";
+    }
+
+    if (formData.transferToOtherSales) {
+      if (!formData.targetSalesPersonId) {
+        errs.targetSalesPersonId = "Vui lòng chọn nhân viên kinh doanh nhận bàn giao.";
+      }
+      if (!formData.transferReason.trim()) {
+        errs.transferReason = "Vui lòng nhập lý do chuyển kinh doanh khác.";
+      }
+    }
+
+    if (isEditing && formData.status === "Thất bại" && !formData.failureReason.trim()) {
+      errs.failureReason = "Bắt buộc nhập lý do khi chọn trạng thái Thất bại.";
     }
 
     if (Object.keys(errs).length > 0) {
@@ -519,42 +424,94 @@ export const NewLeadModal = React.memo(function NewLeadModal({
     setServerError(null);
 
     try {
-      const payload = {
-        customerName: formData.customerName,
-        companyName: formData.companyName || "Khách hàng doanh nghiệp",
-        phone: formData.phone,
-        email: formData.email,
-        product: formData.product,
-        categoryName: formData.category,
-        source: formData.source,
-        status: "Vừa nhận thông tin",
-        salesPersonId: selectedSalesObj?.id,
-        estimatedValue: formData.estimatedValue || "Đang khảo sát",
-        installationAddress: formData.installationAddress,
-        location: formData.location,
-        notes: formData.notes,
-        ledModuleType: formData.ledModuleType,
-        ledWidth: formData.ledWidth,
-        ledHeight: formData.ledHeight,
-        attachments,
-      };
+      if (isEditing && editingLead) {
+        const updatePayload: Record<string, unknown> = {
+          customerName: formData.customerName.trim(),
+          companyName: formData.companyName.trim(),
+          phone: formData.phone.trim(),
+          email: formData.email.trim(),
+          product: formData.product.trim() || "Chưa xác định",
+          categoryCode: formData.categoryCode || undefined,
+          categoryName: selectedProductObj?.name || formData.product.trim() || undefined,
+          productCustomText: requiresCustomProductText
+            ? formData.productCustomText.trim()
+            : null,
+          demandType: formData.demandType,
+          source: formData.source,
+          contactChannel: formData.contactChannel,
+          status: formData.status,
+          failureReason:
+            formData.status === "Thất bại" ? formData.failureReason.trim() : null,
+          hasCustomerResponded: formData.hasCustomerResponded,
+          customerResponseNote: formData.customerResponseNote.trim() || null,
+          installationAddress: formData.installationAddress.trim(),
+          location: formData.location.trim(),
+          notes: formData.notes.trim(),
+          transferToOtherSales: formData.transferToOtherSales,
+          salesPersonId: formData.transferToOtherSales
+            ? formData.targetSalesPersonId
+            : formData.salesPersonId || undefined,
+          transferReason: formData.transferToOtherSales
+            ? formData.transferReason.trim()
+            : undefined,
+        };
 
-      const res = await fetch("/api/leads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+        const res = await fetch(`/api/leads/${editingLead.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatePayload),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.error?.message || "Không thể cập nhật thông tin Lead");
+        }
+        onAddLead(json.data.lead);
+        onClose();
+      } else {
+        const createPayload = {
+          customerName: formData.customerName.trim(),
+          companyName: formData.companyName.trim(),
+          phone: formData.phone.trim(),
+          email: formData.email.trim(),
+          product: formData.product.trim() || "Chưa xác định",
+          categoryCode: formData.categoryCode || undefined,
+          categoryName: selectedProductObj?.name || formData.product.trim() || undefined,
+          productCustomText: requiresCustomProductText
+            ? formData.productCustomText.trim()
+            : null,
+          demandType: formData.demandType,
+          source: formData.source,
+          contactChannel: formData.contactChannel,
+          status: "Vừa nhận thông tin",
+          salesPersonId: formData.transferToOtherSales
+            ? formData.targetSalesPersonId
+            : formData.salesPersonId || undefined,
+          transferToOtherSales: formData.transferToOtherSales,
+          transferReason: formData.transferToOtherSales
+            ? formData.transferReason.trim()
+            : undefined,
+          installationAddress: formData.installationAddress.trim(),
+          location: formData.location.trim(),
+          notes: formData.notes.trim(),
+          attachments,
+        };
 
-      const json = await res.json();
+        const res = await fetch("/api/leads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(createPayload),
+        });
 
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Không thể tạo Lead mới");
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.error?.message || "Không thể tạo Lead mới");
+        }
+
+        onAddLead(json.data.lead);
+        onClose();
       }
-
-      onAddLead(json.data.lead);
-      onClose();
     } catch (err: unknown) {
-      setServerError(err instanceof Error ? err.message : "Lỗi xử lý tạo Lead từ máy chủ");
+      setServerError(err instanceof Error ? err.message : "Lỗi xử lý dữ liệu Lead từ máy chủ");
     } finally {
       setIsSubmitting(false);
     }
@@ -572,20 +529,24 @@ export const NewLeadModal = React.memo(function NewLeadModal({
     >
       <div
         ref={dialogRef}
-        className="modal-panel bg-elevated rounded-2xl border border-slate-200 shadow-floating w-full max-w-2xl max-h-[88vh] my-auto flex flex-col overflow-hidden animate-scale-in"
+        className="modal-panel bg-elevated rounded-2xl border border-slate-200 shadow-floating w-full max-w-2xl max-h-[90vh] my-auto flex flex-col overflow-hidden animate-scale-in"
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200/80 flex items-center justify-between bg-white shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 text-white flex items-center justify-center shrink-0">
-              <Sparkles className="w-4 h-4" />
+            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+              {isEditing ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
             </div>
             <div>
               <h2 id="new-lead-title" className="text-[16px] font-semibold text-slate-900">
-                Thêm Lead nhanh với Trợ lý AI
+                {isEditing
+                  ? `Chỉnh sửa thông tin Lead (${editingLead?.code})`
+                  : "Thêm Lead khách hàng mới"}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Dán tin nhắn để AI tự bóc tách 1 chạm hoặc chọn nhanh cấu hình LED bên dưới
+                {isEditing
+                  ? "Cập nhật thông tin liên hệ, danh mục sản phẩm, trạng thái và phân công kinh doanh."
+                  : "Chỉ bắt buộc Tên khách hàng và Số điện thoại để tiếp nhận nhanh."}
               </p>
             </div>
           </div>
@@ -593,7 +554,7 @@ export const NewLeadModal = React.memo(function NewLeadModal({
             type="button"
             onClick={onClose}
             disabled={isSubmitting}
-            aria-label="Đóng cửa sổ tạo Lead"
+            aria-label="Đóng cửa sổ"
             className="h-8 w-8 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -611,26 +572,19 @@ export const NewLeadModal = React.memo(function NewLeadModal({
           </div>
         )}
 
-        {/* AI Filled Confirmation */}
-        {aiBannerSummary && (
-          <div className="px-6 py-2.5 bg-emerald-50 border-b border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 shrink-0">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>{aiBannerSummary}</span>
-          </div>
-        )}
-
-        {/* Duplicate Warning */}
+        {/* Duplicate Warning (Full DB check, non-blocking) */}
         {duplicateMatches.length > 0 && (
           <div className="px-6 py-2.5 bg-amber-50 border-b border-amber-200/80 text-amber-900 text-xs shrink-0">
             <div className="flex items-center gap-1.5 font-semibold text-amber-800 mb-1">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>Phát hiện hồ sơ có SĐT / Công ty trùng lặp trong hệ thống:</span>
+              <span>Cảnh báo trùng số điện thoại / khách hàng trong toàn hệ thống:</span>
             </div>
             <div className="space-y-0.5 pl-5">
               {duplicateMatches.map((m) => (
                 <div key={m.id} className="text-[11.5px] text-amber-800">
-                  • <strong>{m.customerName}</strong> ({m.companyName}) · SĐT:{" "}
-                  <strong>{m.phone}</strong> · Sales: {m.salesPersonName} ({m.status})
+                  • <strong>{m.code}</strong> — <strong>{m.customerName}</strong>
+                  {m.companyName ? ` (${m.companyName})` : ""} · SĐT: <strong>{m.phone}</strong> ·
+                  Sales: {m.salesPersonName} ({m.status})
                 </div>
               ))}
             </div>
@@ -643,15 +597,7 @@ export const NewLeadModal = React.memo(function NewLeadModal({
           onSubmit={handleSubmit}
           className="flex-1 overflow-y-auto px-6 py-5 space-y-4"
         >
-          {/* Isolated AI Smart Paste Box (typing here never re-renders the form below) */}
-          <AiSmartPasteSection
-            selectedSalesId={selectedSalesObj?.id}
-            onParsedDraft={handleParsedDraft}
-            onInstantCreated={handleInstantCreated}
-            onError={setServerError}
-          />
-
-          {/* Core Fast Fields (Only 3 required inputs!) */}
+          {/* 1. Core Required Fields: Customer Name & Phone */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div>
               <label htmlFor="nl-customer" className="crm-label">
@@ -696,112 +642,108 @@ export const NewLeadModal = React.memo(function NewLeadModal({
             </div>
           </div>
 
-          {/* Product + 1-Click Preset Chips */}
-          <div>
-            <label htmlFor="nl-product" className="crm-label">
-              Hạng mục sản phẩm / Nhu cầu LED <span className="text-rose-500">*</span>
-            </label>
-            <input
-              id="nl-product"
-              type="text"
-              placeholder="VD: Màn hình LED P2.5 trong nhà hội trường (18m²)"
-              value={formData.product}
-              onChange={(e) => {
-                const val = e.target.value;
-                setFormData((prev) => ({ ...prev, product: val }));
-                if (errors.product) setErrors((prev) => ({ ...prev, product: "" }));
-              }}
-              className="crm-input"
-            />
-            {errors.product && (
-              <p className="text-[11.5px] text-rose-600 mt-1">{errors.product}</p>
-            )}
-            <div className="flex flex-wrap items-center gap-1.5 mt-2">
-              <span className="text-[11px] text-slate-400 mr-0.5">Chọn nhanh:</span>
-              {QUICK_PRODUCT_PRESETS.map((preset) => (
-                <button
-                  key={preset.chip}
-                  type="button"
-                  onClick={() => {
+          {/* 2. Structured Product Catalog (Màn hình LED / Bảng Điện Tử + 21 items + Nhu cầu Mua/Thuê) */}
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label htmlFor="nl-product-group" className="crm-label">
+                  Nhóm sản phẩm
+                </label>
+                <select
+                  id="nl-product-group"
+                  value={formData.productGroup}
+                  onChange={(e) => {
+                    const nextGroup = e.target.value;
                     setFormData((prev) => ({
                       ...prev,
-                      product: preset.product,
-                      category: preset.category,
-                      estimatedValue: prev.estimatedValue || preset.estimatedValue,
-                      ledModuleType: preset.ledModuleType,
-                      ledWidth: preset.ledWidth,
-                      ledHeight: preset.ledHeight,
+                      productGroup: nextGroup,
+                      categoryCode: "",
+                      product: "",
+                      productCustomText: "",
                     }));
-                    if (errors.product) setErrors((prev) => ({ ...prev, product: "" }));
                   }}
-                  className="text-[11px] px-2.5 py-1 rounded-md bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200/80 hover:border-blue-300 transition-colors cursor-pointer"
+                  className="crm-select w-full"
                 >
-                  + {preset.chip}
-                </button>
-              ))}
+                  <option value="LED_SCREEN">Màn hình LED</option>
+                  <option value="ELECTRONIC_BOARD">Bảng Điện Tử</option>
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="nl-product-item" className="crm-label">
+                  Danh mục sản phẩm
+                </label>
+                <select
+                  id="nl-product-item"
+                  value={formData.categoryCode}
+                  onChange={(e) => {
+                    const code = e.target.value;
+                    const chosen = catalogItems.find((c) => c.code === code);
+                    setFormData((prev) => ({
+                      ...prev,
+                      categoryCode: code,
+                      product: chosen ? chosen.name : "",
+                    }));
+                  }}
+                  className="crm-select w-full"
+                >
+                  <option value="">-- Chưa chọn / Nhập tự do --</option>
+                  {groupProducts.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="nl-demand-type" className="crm-label">
+                  Loại nhu cầu
+                </label>
+                <select
+                  id="nl-demand-type"
+                  value={formData.demandType}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, demandType: e.target.value }))
+                  }
+                  className="crm-select w-full"
+                >
+                  {OFFICIAL_DEMAND_TYPES.map((dt) => (
+                    <option key={dt} value={dt}>
+                      {dt}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
+
+            {requiresCustomProductText && (
+              <div>
+                <label htmlFor="nl-product-custom" className="crm-label">
+                  Mô tả sản phẩm khác <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  id="nl-product-custom"
+                  type="text"
+                  placeholder="Nhập chi tiết dòng sản phẩm khách hàng yêu cầu..."
+                  value={formData.productCustomText}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormData((prev) => ({ ...prev, productCustomText: val }));
+                    if (errors.productCustomText)
+                      setErrors((prev) => ({ ...prev, productCustomText: "" }));
+                  }}
+                  className="crm-input bg-white"
+                />
+                {errors.productCustomText && (
+                  <p className="text-[11.5px] text-rose-600 mt-1">{errors.productCustomText}</p>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Company & Budget */}
+          {/* 3. Source & Contact Channel */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            <div>
-              <label htmlFor="nl-company" className="crm-label">
-                Tên công ty / Chủ đầu tư
-              </label>
-              <input
-                id="nl-company"
-                type="text"
-                placeholder="VD: Khách sạn Rex / Tập đoàn Hòa Bình"
-                value={formData.companyName}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setFormData((prev) => ({ ...prev, companyName: val }));
-                }}
-                className="crm-input"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="nl-budget" className="crm-label">
-                Dự toán ước tính (AI tự tính theo m²)
-              </label>
-              <input
-                id="nl-budget"
-                type="text"
-                placeholder="VD: 325.500.000 đ"
-                value={formData.estimatedValue}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setFormData((prev) => ({ ...prev, estimatedValue: val }));
-                }}
-                className="crm-input font-semibold text-blue-700"
-              />
-            </div>
-          </div>
-
-          {/* Compact Assignment Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-            <div>
-              <label htmlFor="nl-category" className="crm-label">
-                Phân loại LED
-              </label>
-              <select
-                id="nl-category"
-                value={formData.category}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setFormData((prev) => ({ ...prev, category: val }));
-                }}
-                className="crm-select w-full"
-              >
-                <option value="LED trong nhà">LED trong nhà</option>
-                <option value="LED ngoài trời">LED ngoài trời</option>
-                <option value="Bảng điện tử">Bảng điện tử</option>
-                <option value="Màn hình cong / đặc thù">Màn hình cong / đặc thù</option>
-                <option value="Khác">Khác</option>
-              </select>
-            </div>
-
             <div>
               <label htmlFor="nl-source" className="crm-label">
                 Nguồn tiếp cận
@@ -815,210 +757,380 @@ export const NewLeadModal = React.memo(function NewLeadModal({
                 }}
                 className="crm-select w-full"
               >
-                <option value="Hotline">Hotline / Zalo</option>
-                <option value="Website">Website Toàn Trung</option>
-                <option value="Google Ads">Google Ads</option>
-                <option value="Facebook Ads">Facebook Ads</option>
-                <option value="Form">Form đăng ký</option>
-                <option value="Email">Email</option>
-                <option value="Giới thiệu">Giới thiệu</option>
-                <option value="Triển lãm">Triển lãm</option>
+                {SOURCE_LIST.map((src) => (
+                  <option key={src} value={src}>
+                    {src}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div>
-              <label htmlFor="nl-sales" className="crm-label">
-                Sales phụ trách
+              <label htmlFor="nl-channel" className="crm-label">
+                Kênh liên hệ
               </label>
               <select
-                id="nl-sales"
-                value={formData.salesPersonName}
+                id="nl-channel"
+                value={formData.contactChannel}
                 onChange={(e) => {
                   const val = e.target.value;
-                  const s = salesList.find((item) => item.name === val);
-                  setFormData((prev) => ({
-                    ...prev,
-                    salesPersonName: val,
-                    salesPersonId: s?.id || "",
-                  }));
+                  setFormData((prev) => ({ ...prev, contactChannel: val }));
                 }}
                 className="crm-select w-full"
               >
-                {salesList.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.name}
+                {OFFICIAL_CONTACT_CHANNELS.map((ch) => (
+                  <option key={ch} value={ch}>
+                    {ch}
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Collapsible Optional Details to keep fast entry clean */}
-          <div className="pt-1">
-            <button
-              type="button"
-              onClick={() => setShowAdvancedFields((v) => !v)}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-600 cursor-pointer"
-            >
-              {showAdvancedFields ? (
-                <ChevronUp className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5" />
-              )}
-              <span>
-                {showAdvancedFields
-                  ? "Thu gọn thông tin bổ sung (Email, Địa chỉ công trình, Bản vẽ CAD)"
-                  : "Mở rộng thông tin bổ sung (Email, Địa chỉ lắp đặt, Đính kèm bản vẽ CAD)"}
-              </span>
-            </button>
+          {/* 4. Company, Location & Email */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            <div>
+              <label htmlFor="nl-company" className="crm-label">
+                Tên công ty / Đơn vị
+              </label>
+              <input
+                id="nl-company"
+                type="text"
+                placeholder="Tùy chọn (để trống nếu chưa rõ)"
+                value={formData.companyName}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData((prev) => ({ ...prev, companyName: val }));
+                }}
+                className="crm-input"
+              />
+            </div>
 
-            {showAdvancedFields && (
-              <div className="mt-3 space-y-3.5 p-4 rounded-xl bg-slate-50/70 border border-slate-200/80">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div>
-                    <label htmlFor="nl-email" className="crm-label">
-                      Email liên hệ
-                    </label>
-                    <input
-                      id="nl-email"
-                      type="email"
-                      placeholder="contact@doanhnghiep.vn"
-                      value={formData.email}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setFormData((prev) => ({ ...prev, email: val }));
-                      }}
-                      className="crm-input bg-white"
-                    />
-                  </div>
+            <div>
+              <label htmlFor="nl-location" className="crm-label">
+                Tỉnh / Thành phố
+              </label>
+              <input
+                id="nl-location"
+                type="text"
+                placeholder="VD: TP. Hồ Chí Minh, Hà Nội..."
+                value={formData.location}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData((prev) => ({ ...prev, location: val }));
+                }}
+                className="crm-input"
+              />
+            </div>
 
-                  <div>
-                    <label htmlFor="nl-location" className="crm-label">
-                      Tỉnh / Thành phố
-                    </label>
-                    <input
-                      id="nl-location"
-                      type="text"
-                      placeholder="TP. Hồ Chí Minh"
-                      value={formData.location}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setFormData((prev) => ({ ...prev, location: val }));
-                      }}
-                      className="crm-input bg-white"
-                    />
-                  </div>
+            <div>
+              <label htmlFor="nl-email" className="crm-label">
+                Email liên hệ
+              </label>
+              <input
+                id="nl-email"
+                type="email"
+                placeholder="khachhang@congty.vn"
+                value={formData.email}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData((prev) => ({ ...prev, email: val }));
+                }}
+                className="crm-input"
+              />
+            </div>
+          </div>
+
+          {/* 5. Status & Quote Response Tracking (when editing) */}
+          {isEditing && (
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="nl-status" className="crm-label">
+                    Trạng thái bán hàng
+                  </label>
+                  <select
+                    id="nl-status"
+                    value={formData.status}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        status: e.target.value as LeadStatus,
+                      }))
+                    }
+                    className="crm-select w-full font-medium"
+                  >
+                    {STATUS_LIST.map((st) => (
+                      <option key={st} value={st}>
+                        {st}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
+                {formData.status === "Đã gửi báo giá" && (
+                  <div>
+                    <label htmlFor="nl-quote-response" className="crm-label">
+                      Phản hồi khách hàng sau báo giá
+                    </label>
+                    <select
+                      id="nl-quote-response"
+                      value={formData.hasCustomerResponded ? "responded" : "waiting"}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          hasCustomerResponded: e.target.value === "responded",
+                        }))
+                      }
+                      className="crm-select w-full"
+                    >
+                      <option value="waiting">Đã gửi báo giá — Chưa ghi nhận phản hồi</option>
+                      <option value="responded">Khách hàng đã phản hồi</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {formData.status === "Đã gửi báo giá" && (
                 <div>
-                  <label htmlFor="nl-address" className="crm-label">
-                    Địa chỉ công trình lắp đặt
+                  <label htmlFor="nl-response-note" className="crm-label">
+                    Ghi chú phản hồi báo giá
                   </label>
                   <input
-                    id="nl-address"
+                    id="nl-response-note"
                     type="text"
-                    placeholder="Số nhà, đường, quận/huyện..."
-                    value={formData.installationAddress}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setFormData((prev) => ({ ...prev, installationAddress: val }));
-                    }}
+                    placeholder="Ghi chú ý kiến phản hồi của khách hàng về báo giá..."
+                    value={formData.customerResponseNote}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        customerResponseNote: e.target.value,
+                      }))
+                    }
                     className="crm-input bg-white"
                   />
                 </div>
+              )}
 
+              {formData.status === "Thất bại" && (
                 <div>
-                  <label className="crm-label">Tài liệu / Ảnh hiện trạng / Bản vẽ CAD</label>
-                  <div className="border border-dashed border-slate-300 rounded-xl p-2.5 bg-white">
-                    <input
-                      type="file"
-                      multiple
-                      id="file-upload-input"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                      accept=".jpg,.jpeg,.png,.webp,.pdf,.dwg,.dxf"
-                    />
-                    <label
-                      htmlFor="file-upload-input"
-                      className="flex items-center justify-center gap-2 cursor-pointer text-slate-600 hover:text-blue-600 py-1"
-                    >
-                      {isUploading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                          <span className="text-xs font-medium">Đang tải tệp lên...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="w-4 h-4 text-blue-600" />
-                          <span className="text-xs font-medium">
-                            Tải ảnh mặt bằng hoặc bản vẽ CAD (Tối đa 15MB)
-                          </span>
-                        </>
-                      )}
-                    </label>
+                  <label htmlFor="nl-failure-reason" className="crm-label">
+                    Lý do Thất bại <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    id="nl-failure-reason"
+                    type="text"
+                    placeholder="Nhập nguyên nhân khách không chốt..."
+                    value={formData.failureReason}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormData((prev) => ({ ...prev, failureReason: val }));
+                      if (errors.failureReason)
+                        setErrors((prev) => ({ ...prev, failureReason: "" }));
+                    }}
+                    className="crm-input bg-white border-rose-300"
+                  />
+                  {errors.failureReason && (
+                    <p className="text-[11.5px] text-rose-600 mt-1">{errors.failureReason}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
-                    {attachments.length > 0 && (
-                      <div className="mt-2 space-y-1 pt-2 border-t border-slate-200/80">
-                        {attachments.map((file, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between px-2.5 py-1 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700"
-                          >
-                            <div className="flex items-center gap-2 truncate">
-                              <FileText className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                              <span className="truncate">{file.fileName}</span>
-                            </div>
-                            <StatusBadge tone="success" dot={false} size="sm">
-                              Đã tải
-                            </StatusBadge>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+          {/* 6. Sales Assignment & Checkbox "Chuyển kinh doanh khác" (AC-12) */}
+          <div className="p-3.5 rounded-xl border border-slate-200/90 bg-white space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs text-slate-700">
+                <UserCheck className="w-4 h-4 text-blue-600" />
+                <span>
+                  Nhân viên kinh doanh phụ trách hiện tại:{" "}
+                  <strong className="text-slate-900">
+                    {salesList.find((s) => s.id === formData.salesPersonId)?.name ||
+                      editingLead?.salesPerson?.name ||
+                      salesList[0]?.name ||
+                      "Tự động gán"}
+                  </strong>
+                </span>
+              </div>
+
+              <label className="inline-flex items-center gap-2 text-xs font-semibold text-blue-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={formData.transferToOtherSales}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setFormData((prev) => ({
+                      ...prev,
+                      transferToOtherSales: checked,
+                      targetSalesPersonId:
+                        prev.targetSalesPersonId ||
+                        salesList.find((s) => s.id !== prev.salesPersonId)?.id ||
+                        salesList[0]?.id ||
+                        "",
+                    }));
+                  }}
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span>Chuyển kinh doanh khác</span>
+              </label>
+            </div>
+
+            {formData.transferToOtherSales && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                <div>
+                  <label htmlFor="nl-target-sales" className="crm-label">
+                    Chọn nhân viên kinh doanh nhận Lead <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    id="nl-target-sales"
+                    value={formData.targetSalesPersonId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormData((prev) => ({ ...prev, targetSalesPersonId: val }));
+                      if (errors.targetSalesPersonId)
+                        setErrors((prev) => ({ ...prev, targetSalesPersonId: "" }));
+                    }}
+                    className="crm-select w-full"
+                  >
+                    <option value="">-- Chọn Sales nhận bàn giao --</option>
+                    {salesList.map((s) => (
+                      <option key={s.id || s.name} value={s.id || s.name}>
+                        {s.name} ({s.initials})
+                      </option>
+                    ))}
+                  </select>
+                  {errors.targetSalesPersonId && (
+                    <p className="text-[11.5px] text-rose-600 mt-1">{errors.targetSalesPersonId}</p>
+                  )}
                 </div>
 
                 <div>
-                  <label htmlFor="nl-notes" className="crm-label">
-                    Ghi chú kỹ thuật &amp; tiến độ
+                  <label htmlFor="nl-transfer-reason" className="crm-label">
+                    Lý do chuyển kinh doanh <span className="text-rose-500">*</span>
                   </label>
-                  <textarea
-                    id="nl-notes"
-                    rows={2}
-                    placeholder="Ghi chú kích thước, độ sáng, khoảng cách nhìn, thời hạn báo giá..."
-                    value={formData.notes}
+                  <input
+                    id="nl-transfer-reason"
+                    type="text"
+                    placeholder="VD: Phân tuyến khu vực / Chuyên môn dự án..."
+                    value={formData.transferReason}
                     onChange={(e) => {
                       const val = e.target.value;
-                      setFormData((prev) => ({ ...prev, notes: val }));
+                      setFormData((prev) => ({ ...prev, transferReason: val }));
+                      if (errors.transferReason)
+                        setErrors((prev) => ({ ...prev, transferReason: "" }));
                     }}
-                    className="crm-textarea bg-white resize-none"
+                    className="crm-input"
                   />
+                  {errors.transferReason && (
+                    <p className="text-[11.5px] text-rose-600 mt-1">{errors.transferReason}</p>
+                  )}
                 </div>
               </div>
             )}
           </div>
+
+          {/* 7. Installation Address & Notes */}
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="nl-address" className="crm-label">
+                Địa chỉ khảo sát / lắp đặt chi tiết
+              </label>
+              <input
+                id="nl-address"
+                type="text"
+                placeholder="Số nhà, đường, tòa nhà..."
+                value={formData.installationAddress}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData((prev) => ({ ...prev, installationAddress: val }));
+                }}
+                className="crm-input"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="nl-notes" className="crm-label">
+                Ghi chú yêu cầu của khách hàng
+              </label>
+              <textarea
+                id="nl-notes"
+                rows={2}
+                placeholder="Ghi chú nhu cầu kỹ thuật, tiến độ mong muốn..."
+                value={formData.notes}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData((prev) => ({ ...prev, notes: val }));
+                }}
+                className="crm-textarea resize-none"
+              />
+            </div>
+
+            {/* File Attachments */}
+            <div>
+              <label className="crm-label">Tài liệu / Hình ảnh đính kèm</label>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 cursor-pointer transition-colors">
+                  {isUploading ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                  ) : (
+                    <Upload className="w-3.5 h-3.5 text-slate-500" />
+                  )}
+                  <span>{isUploading ? "Đang tải lên..." : "Chọn tệp đính kèm"}</span>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={handleFileUpload}
+                    disabled={isUploading}
+                    className="hidden"
+                  />
+                </label>
+
+                {attachments.map((file, idx) => (
+                  <span
+                    key={`${file.fileName}-${idx}`}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 border border-blue-200/80 text-xs text-blue-700"
+                  >
+                    <FileText className="w-3 h-3 shrink-0" />
+                    <span className="truncate max-w-[160px]">{file.fileName}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAttachments((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                      aria-label={`Xóa tệp ${file.fileName}`}
+                      className="text-blue-400 hover:text-blue-700 ml-0.5 cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
         </form>
 
-        {/* Modal Footer */}
-        <div className="px-6 py-3.5 border-t border-slate-200/80 bg-slate-50/70 flex items-center justify-between gap-2.5 shrink-0">
-          <span className="text-[11.5px] text-slate-500 hidden sm:inline">
-            Tự động gắn SLA gọi trong <strong>2 giờ</strong> &amp; chấm điểm ưu tiên Lead
-          </span>
-          <div className="flex items-center gap-2.5 ml-auto">
-            <Button variant="secondary" size="md" onClick={onClose} disabled={isSubmitting}>
-              Hủy
-            </Button>
-            <Button
-              type="submit"
-              form="new-lead-form"
-              variant="primary"
-              size="md"
-              isLoading={isSubmitting}
-              leftIcon={<Plus className="w-4 h-4" />}
-            >
-              {isSubmitting ? "Đang lưu..." : "Lưu Lead"}
-            </Button>
-          </div>
+        {/* Footer */}
+        <div className="px-6 py-3.5 border-t border-slate-200/80 bg-slate-50/50 flex items-center justify-end gap-2.5 shrink-0">
+          <Button
+            type="button"
+            variant="secondary"
+            size="md"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
+            Hủy
+          </Button>
+          <Button
+            type="submit"
+            form="new-lead-form"
+            variant="primary"
+            size="md"
+            isLoading={isSubmitting}
+            leftIcon={isEditing ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+          >
+            {isEditing ? "Lưu thay đổi" : "Lưu Lead mới"}
+          </Button>
         </div>
       </div>
     </div>,

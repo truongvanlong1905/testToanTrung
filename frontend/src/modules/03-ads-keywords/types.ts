@@ -6,6 +6,11 @@ export interface CampaignItem {
   status: string;
   budget: number;
   spent: number;
+  impressions?: number;
+  clicks?: number;
+  conversions?: number;
+  platformConversions?: number;
+  crmLeadsFromAds?: number;
   startDate?: string;
 }
 
@@ -25,6 +30,8 @@ export interface AdsStatsSummary {
   totalSpent: number;
   totalClicks: number;
   totalImpressions: number;
+  totalPlatformConversions?: number;
+  totalCrmLeadsFromAds?: number;
   avgCtr: string;
   avgCpc: number;
 }

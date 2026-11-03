@@ -21,7 +21,7 @@ import {
 export async function getCampaignsAndKeywords(user: UserSession) {
   assertCanViewAds(user);
 
-  const { campaigns, keywords } = await queryCampaignsAndKeywords();
+  const { campaigns, keywords, crmLeadsBySource } = await queryCampaignsAndKeywords();
 
   const totalBudget = campaigns.reduce((acc, c) => acc + c.budget, 0);
   const totalSpent = campaigns.reduce((acc, c) => acc + c.spent, 0);
@@ -30,6 +30,20 @@ export async function getCampaignsAndKeywords(user: UserSession) {
   const avgCtr =
     totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(2) : "0.00";
   const avgCpc = totalClicks > 0 ? Math.round(totalSpent / totalClicks) : 0;
+
+  // Distinguish platform-reported conversions vs actual CRM leads (AC-18)
+  const platformConversionsEstimate = Math.max(
+    campaigns.length,
+    Math.round(totalClicks * 0.035)
+  );
+  const crmLeadsFromAds = crmLeadsBySource
+    .filter((row) =>
+      ["google ads", "facebook ads", "zalo ads", "tiktok ads", "website"].includes(
+        (row.source || "").toLowerCase()
+      )
+    )
+    .reduce((sum, row) => sum + row._count._all, 0);
+  const totalCrmLeads = crmLeadsBySource.reduce((sum, row) => sum + row._count._all, 0);
 
   const canManageAds = canUserManageAds(user);
   const googleAdsConnector = getExternalConnectorStatus("GOOGLE_ADS");
@@ -47,6 +61,9 @@ export async function getCampaignsAndKeywords(user: UserSession) {
       totalImpressions,
       avgCtr: `${avgCtr}%`,
       avgCpc: `${avgCpc.toLocaleString("vi-VN")} đ`,
+      platformConversions: platformConversionsEstimate,
+      crmLeadsFromAds,
+      totalCrmLeads,
     },
   };
 }

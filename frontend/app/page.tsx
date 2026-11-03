@@ -7,6 +7,7 @@ import { Sidebar } from "@/src/core/layout/Sidebar";
 import { Header } from "@/src/core/layout/Header";
 import { PageSkeleton } from "@/src/core/ui/feedback-states";
 import { Toast } from "@/src/core/ui/toast";
+import { canRoleAccessTab, type AppTabId } from "@/src/core/auth/permissions";
 import {
   LeadsWorkspaceView,
   useLeadsWorkspace,
@@ -16,8 +17,6 @@ import {
 } from "@/src/modules/01-leads";
 import { OverviewView } from "@/src/modules/04-reports-dashboard";
 
-// Heavy / rarely-first views are split into their own chunks and fetched when first opened,
-// so the first paint only ships the shell + Dashboard + Lead list.
 const viewLoading = () => <PageSkeleton cards={4} rows={5} />;
 const TrackingView = dynamic(
   () => import("@/src/modules/02-tracking").then((m) => m.TrackingView),
@@ -62,8 +61,6 @@ const NotificationsView = dynamic(
   { loading: viewLoading }
 );
 
-// Only mounted while open (see render below), with chunks preloaded on browser idle / button hover
-// so clicking "Thêm Lead / AI" opens in a single frame with zero network wait.
 const LeadDetailModal = dynamic(loadLeadDetailModal);
 const NewLeadModal = dynamic(loadNewLeadModal);
 const ImportLeadsModal = dynamic(loadImportLeadsModal);
@@ -73,27 +70,27 @@ function getPageMeta(tab: string): { title: string; group: string } {
     case "overview":
       return { title: "Dashboard", group: "Tổng quan" };
     case "leads":
-      return { title: "Quản lý Lead", group: "Workspace" };
+      return { title: "Quản lý Lead", group: "Kinh doanh" };
     case "tracking":
-      return { title: "Tracking", group: "Workspace" };
+      return { title: "Tracking", group: "Tích hợp" };
     case "ads":
-      return { title: "Quảng cáo & Từ khóa", group: "Workspace" };
+      return { title: "Quảng cáo & Từ khóa", group: "Marketing" };
     case "reports":
-      return { title: "Báo cáo", group: "Workspace" };
+      return { title: "Báo cáo", group: "Thống kê" };
     case "ai-design":
-      return { title: "AI Design", group: "Workspace" };
+      return { title: "AI Design", group: "Thiết kế" };
     case "brand":
-      return { title: "Thương hiệu", group: "System" };
+      return { title: "Thương hiệu", group: "Hệ thống" };
     case "notifications":
-      return { title: "Trung tâm Thông báo", group: "System" };
+      return { title: "Trung tâm Thông báo", group: "Hệ thống" };
     case "users":
-      return { title: "Tác nhân & Bổ nhiệm", group: "System" };
+      return { title: "Quản lý Tài khoản", group: "Hệ thống" };
     case "profile":
-      return { title: "Hồ sơ tài khoản", group: "System" };
+      return { title: "Hồ sơ tài khoản", group: "Hệ thống" };
     case "settings":
-      return { title: "Cài đặt hệ thống", group: "System" };
+      return { title: "Cài đặt hệ thống", group: "Hệ thống" };
     default:
-      return { title: "Dashboard", group: "Workspace" };
+      return { title: "Dashboard", group: "Tổng quan" };
   }
 }
 
@@ -103,7 +100,6 @@ export default function LeadsDashboardPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
-  // User state
   const [currentUser, setCurrentUser] = useState<{
     name: string;
     role: string;
@@ -111,7 +107,6 @@ export default function LeadsDashboardPage() {
     avatar?: string | null;
   } | null>(null);
 
-  // Toast feedback state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -120,12 +115,35 @@ export default function LeadsDashboardPage() {
     }, 3200);
   }, []);
 
+  const canAccessLeads = Boolean(
+    currentUser && canRoleAccessTab(currentUser.role, "leads")
+  );
+
   const leadsWorkspace = useLeadsWorkspace({
     currentUserName: currentUser?.name,
+    enabled: canAccessLeads,
     showToast,
   });
 
-  // Preload modal chunks during browser idle time after initial hydration so first modal click is instant
+  // Safe tab switcher with role permission guard (AC-03)
+  const navigateToTabSafe = useCallback(
+    (targetTab: string, searchText?: string) => {
+      if (currentUser && !canRoleAccessTab(currentUser.role, targetTab as AppTabId)) {
+        showToast("Vai trò của bạn không có quyền truy cập mục này.");
+        setCurrentTab("overview");
+        return;
+      }
+      setCurrentTab(targetTab);
+      if (targetTab === "leads" && typeof searchText === "string") {
+        leadsWorkspace.setSearchQuery(searchText);
+      } else if (targetTab !== "leads") {
+        leadsWorkspace.setSearchQuery("");
+      }
+    },
+    [currentUser, leadsWorkspace, showToast]
+  );
+
+  // Preload modal chunks during browser idle time after initial hydration
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadNewLeadModal();
@@ -135,7 +153,7 @@ export default function LeadsDashboardPage() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  // Auth Guard
+  // Auth Guard & URL ?tab= Guard (AC-03)
   useEffect(() => {
     fetch("/api/auth/me")
       .then((res) => {
@@ -147,7 +165,21 @@ export default function LeadsDashboardPage() {
       })
       .then((json) => {
         if (json?.success && json.data?.user) {
-          setCurrentUser(json.data.user);
+          const user = json.data.user;
+          setCurrentUser(user);
+
+          if (typeof window !== "undefined") {
+            const params = new URLSearchParams(window.location.search);
+            const requestedTab = params.get("tab");
+            if (requestedTab) {
+              if (canRoleAccessTab(user.role, requestedTab as AppTabId)) {
+                setCurrentTab(requestedTab);
+              } else {
+                showToast("Vai trò của bạn không có quyền truy cập đường dẫn này.");
+                setCurrentTab("overview");
+              }
+            }
+          }
         } else if (json !== null) {
           router.push("/login");
         }
@@ -155,71 +187,64 @@ export default function LeadsDashboardPage() {
       .catch(() => {
         router.push("/login");
       });
-  }, [router]);
+  }, [router, showToast]);
 
   const pageMeta = getPageMeta(currentTab);
 
   return (
     <div className="min-h-screen flex app-canvas text-slate-900">
-      {/* Toast Notification */}
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
 
-      {/* Sidebar */}
       <Sidebar
         currentTab={currentTab}
-        onTabChange={(tab) => {
-          setCurrentTab(tab);
-          if (tab !== "leads") leadsWorkspace.setSearchQuery("");
-        }}
+        onTabChange={(tab) => navigateToTabSafe(tab)}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         userRole={currentUser?.role}
         unreadNotificationsCount={unreadNotificationsCount}
         leadsCount={
-          leadsWorkspace.hasLoadedLeads
+          canAccessLeads && leadsWorkspace.hasLoadedLeads
             ? leadsWorkspace.leadStats.total
             : undefined
         }
       />
 
-      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         <Header
           onMenuToggle={() => setIsSidebarOpen((prev) => !prev)}
           pageTitle={pageMeta.title}
           pageGroup={pageMeta.group}
           currentUser={currentUser || undefined}
-          onNavigateToTab={(tab, searchText) => {
-            setCurrentTab(tab);
-            leadsWorkspace.setSearchQuery(
-              tab === "leads" ? searchText || "" : ""
-            );
-          }}
+          onNavigateToTab={(tab, searchText) => navigateToTabSafe(tab, searchText)}
           onUnreadCountChange={setUnreadNotificationsCount}
         />
 
         <main className="flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8 max-w-[1440px] w-full mx-auto">
-          {/* key={currentTab} remounts the wrapper so every tab switch gets a short entrance */}
           <div key={currentTab} className="space-y-6 animate-page-in">
             {/* TAB: DASHBOARD (OVERVIEW) */}
             {currentTab === "overview" && (
               <OverviewView
                 leads={leadsWorkspace.leads}
                 stats={leadsWorkspace.leadStats}
-                hasLoadedLeads={leadsWorkspace.hasLoadedLeads}
+                hasLoadedLeads={leadsWorkspace.hasLoadedLeads || !canAccessLeads}
+                userRole={currentUser?.role}
                 onNavigateToLeads={(status) => {
+                  if (!canAccessLeads) {
+                    showToast("Vai trò của bạn không có quyền truy cập Quản lý Lead.");
+                    return;
+                  }
                   leadsWorkspace.setStatusFilter(
                     status && status !== "all" ? status : "all"
                   );
                   setCurrentTab("leads");
                 }}
-                onNavigateToTab={(tab) => setCurrentTab(tab)}
+                onNavigateToTab={(tab) => navigateToTabSafe(tab)}
                 onSelectLead={leadsWorkspace.handleSelectLead}
               />
             )}
 
             {/* TAB: LEAD MANAGEMENT */}
-            {currentTab === "leads" && (
+            {currentTab === "leads" && canAccessLeads && (
               <LeadsWorkspaceView
                 displayedLeads={leadsWorkspace.displayedLeads}
                 leadStats={leadsWorkspace.leadStats}
@@ -251,36 +276,39 @@ export default function LeadsDashboardPage() {
                 onResetFilters={leadsWorkspace.handleResetFilters}
                 onFilterStatus={leadsWorkspace.handleFilterStatus}
                 onSelectLead={leadsWorkspace.handleSelectLead}
+                onEditLead={leadsWorkspace.handleOpenEditLead}
                 onOpenNewLead={leadsWorkspace.handleOpenNewLead}
                 onOpenImportLeads={() =>
                   leadsWorkspace.setIsImportLeadsOpen(true)
                 }
                 onExportLeads={() => void leadsWorkspace.handleExportLeads()}
                 isExportingLeads={leadsWorkspace.isExportingLeads}
-                onQuickLeadCreated={leadsWorkspace.handleQuickLeadCreated}
-                onOpenPrefilledModal={leadsWorkspace.handleOpenPrefilledModal}
                 onQuickUpdateStatus={leadsWorkspace.handleQuickUpdateStatus}
                 onRetryFetch={() => void leadsWorkspace.fetchLeads()}
               />
             )}
 
             {/* TAB: TRACKING */}
-            {currentTab === "tracking" && <TrackingView />}
+            {currentTab === "tracking" &&
+              canRoleAccessTab(currentUser?.role, "tracking") && <TrackingView />}
 
             {/* TAB: ADS & KEYWORDS */}
-            {currentTab === "ads" && <AdsView />}
+            {currentTab === "ads" &&
+              canRoleAccessTab(currentUser?.role, "ads") && <AdsView />}
 
             {/* TAB: REPORTS */}
-            {currentTab === "reports" && (
-              <ReportsView
-                leads={leadsWorkspace.leads}
-                userRole={currentUser?.role}
-                onSelectLead={leadsWorkspace.handleSelectLead}
-              />
-            )}
+            {currentTab === "reports" &&
+              canRoleAccessTab(currentUser?.role, "reports") && (
+                <ReportsView
+                  leads={leadsWorkspace.leads}
+                  userRole={currentUser?.role}
+                  onSelectLead={leadsWorkspace.handleSelectLead}
+                />
+              )}
 
             {/* TAB: AI DESIGN STUDIO */}
-            {currentTab === "ai-design" && <AiDesignView />}
+            {currentTab === "ai-design" &&
+              canRoleAccessTab(currentUser?.role, "ai-design") && <AiDesignView />}
 
             {/* TAB: NOTIFICATIONS CENTER */}
             {currentTab === "notifications" && (
@@ -288,36 +316,42 @@ export default function LeadsDashboardPage() {
                 leads={leadsWorkspace.leads}
                 userRole={currentUser?.role}
                 onSelectLead={leadsWorkspace.handleSelectLead}
-                onNavigateToTab={(tab) => setCurrentTab(tab)}
+                onNavigateToTab={(tab) => navigateToTabSafe(tab)}
                 onUnreadCountChange={setUnreadNotificationsCount}
               />
             )}
 
             {/* TAB: ADMIN BRAND */}
-            {currentTab === "brand" && <AdminBrandView />}
+            {currentTab === "brand" &&
+              canRoleAccessTab(currentUser?.role, "brand") && <AdminBrandView />}
 
             {/* TAB: ADMIN USERS */}
-            {currentTab === "users" && <AdminUsersView />}
+            {currentTab === "users" &&
+              canRoleAccessTab(currentUser?.role, "users") && <AdminUsersView />}
 
             {/* TAB: USER / ADMIN PROFILE */}
             {currentTab === "profile" && (
               <ProfileView
                 onProfileUpdated={(updatedUser) => setCurrentUser(updatedUser)}
-                onNavigateToUsersAdmin={() => setCurrentTab("users")}
+                onNavigateToUsersAdmin={() => navigateToTabSafe("users")}
               />
             )}
 
             {/* TAB: ADMIN SETTINGS */}
-            {currentTab === "settings" && <AdminSettingsView />}
+            {currentTab === "settings" &&
+              canRoleAccessTab(currentUser?.role, "settings") && <AdminSettingsView />}
           </div>
         </main>
       </div>
 
-      {/* Slide-Over Detail Sheet & Create Modal — mounted only while open (code-split) */}
+      {/* Slide-Over Detail Sheet & Create/Edit Modal */}
       {leadsWorkspace.selectedLead && (
         <LeadDetailModal
           lead={leadsWorkspace.selectedLead}
           onClose={() => leadsWorkspace.setSelectedLead(null)}
+          onEditLead={(leadToEdit) => {
+            leadsWorkspace.handleOpenEditLead(leadToEdit);
+          }}
           onUpdateStatus={leadsWorkspace.handleUpdateStatus}
           onReassignSales={leadsWorkspace.handleReassignSales}
           currentUserRole={currentUser?.role}
@@ -328,14 +362,12 @@ export default function LeadsDashboardPage() {
       {leadsWorkspace.isNewLeadOpen && (
         <NewLeadModal
           isOpen={leadsWorkspace.isNewLeadOpen}
+          editingLead={leadsWorkspace.editingLead}
           onClose={() => {
             leadsWorkspace.setIsNewLeadOpen(false);
-            leadsWorkspace.setAiLeadDraft(null);
-            leadsWorkspace.setAiLeadWarning(null);
+            leadsWorkspace.setEditingLead(null);
           }}
           onAddLead={leadsWorkspace.handleAddLead}
-          initialDraft={leadsWorkspace.aiLeadDraft}
-          initialWarning={leadsWorkspace.aiLeadWarning}
         />
       )}
 

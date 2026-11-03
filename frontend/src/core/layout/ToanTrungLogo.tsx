@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React from "react";
 import { cn } from "@/src/core/utils/utils";
@@ -32,7 +32,6 @@ export function ToanTrungLogo({
 
   return (
     <div className={cn("inline-flex items-center gap-2.5 select-none", className)}>
-      {/* Royal-blue → navy tile: the brand anchor in both themes */}
       <div
         className={cn(
           iconDimensions,
@@ -62,9 +61,6 @@ export function ToanTrungLogo({
             )}
           >
             TOÀN TRUNG
-          </span>
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
-            CRM
           </span>
         </div>
       )}

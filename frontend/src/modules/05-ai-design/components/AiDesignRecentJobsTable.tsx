@@ -23,8 +23,8 @@ export function AiDesignRecentJobsTable({
   return (
     <div className="crm-card overflow-hidden">
       <CardHeader
-        title="Recent Jobs"
-        description="Các yêu cầu thiết kế đã chạy trong phiên làm việc này — bấm Xem để mở lại kết quả"
+        title="Lịch sử tác vụ thiết kế trong phiên"
+        description="Các yêu cầu phác thảo đã thực hiện trong phiên làm việc hiện tại — bấm Xem để mở lại kết quả"
         count={recentJobs.length}
       />
 
@@ -33,14 +33,14 @@ export function AiDesignRecentJobsTable({
           compact
           icon={Clock}
           title="Chưa có tác vụ thiết kế nào trong phiên"
-          description="Khi bạn chạy tạo Banner LED, Storyboard hoặc Mockup, trạng thái xử lý và kết quả đầu ra sẽ hiển thị tại đây."
+          description="Khi bạn khởi tạo bản nháp Banner LED, Kịch bản phân cảnh hoặc Phối cảnh công trình, kết quả sẽ hiển thị tại đây."
         />
       ) : (
         <div className="overflow-x-auto">
           <table className="crm-table">
             <thead>
               <tr>
-                <th>Mã Job</th>
+                <th>Mã tác vụ</th>
                 <th>Hạng mục</th>
                 <th>Nội dung yêu cầu</th>
                 <th>Thông số</th>

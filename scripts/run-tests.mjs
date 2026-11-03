@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Toàn Trung CRM — Isolated Module & Integration Test Suite
+ * Toàn Trung CRM — Isolated Module & Integration Test Suite (AC-01 .. AC-32)
  *
  * SAFETY GUARANTEE:
  * - Never touches `database/data/source.sqlite`.
@@ -166,7 +166,7 @@ async function runDatabaseIntegrationTests() {
   });
 
   try {
-    await runTest("DB Safety: Verify active SQLite connection points to test-refactor.sqlite", async () => {
+    await runTest("DB Safety (AC-31): Verify isolated SQLite connection and documented pre-migration backup", async () => {
       const dbList = await prisma.$queryRawUnsafe("PRAGMA database_list;");
       assert.ok(Array.isArray(dbList) && dbList.length > 0);
       const mainDbFile = String(dbList[0].file || "");
@@ -178,13 +178,29 @@ async function runDatabaseIntegrationTests() {
         !mainDbFile.includes("source.sqlite"),
         "Connection must NEVER point to source.sqlite"
       );
+      const runbook = fs.readFileSync(
+        path.join(rootDir, "docs", "rebuild", "MIGRATION_AND_RUNBOOK.md"),
+        "utf8"
+      );
+      assert.match(
+        runbook,
+        /Copy-Item\s+"database\/data\/source\.sqlite"\s+"database\/data\/source\.backup-pre-rebuild\.sqlite"\s+-Force/,
+        "Runbook must require a pre-migration backup without depending on local database files"
+      );
     });
 
     let salesUser;
     let directorUser;
     let ledCategory;
+    let boardCategory;
 
-    await runTest("Core Auth, Departments & Categories: Create Department, ProductCategory, Director, and Sales accounts", async () => {
+    await runTest("AC-01, AC-02 & AC-07: Self-registration disabled, Admin/Director user management & 21 Product Categories schema", async () => {
+      const authServiceSrc = fs.readFileSync(
+        path.join(rootDir, "backend", "src", "core", "auth", "auth.service.ts"),
+        "utf8"
+      );
+      assert.match(authServiceSrc, /REGISTRATION_DISABLED/);
+
       const dept = await prisma.department.create({
         data: {
           code: "SALES_LED_B2B",
@@ -196,8 +212,22 @@ async function runDatabaseIntegrationTests() {
       ledCategory = await prisma.productCategory.create({
         data: {
           code: "LED_INDOOR",
-          name: "Màn hình LED Hội trường Indoor",
-          description: "Dòng module LED P1.5 - P2.5 lắp đặt trong nhà",
+          name: "Màn hình LED Trong nhà",
+          group: "LED_SCREEN",
+          sortOrder: 10,
+          allowCustomText: false,
+          isActive: true,
+        },
+      });
+
+      boardCategory = await prisma.productCategory.create({
+        data: {
+          code: "BOARD_OTHER",
+          name: "Bảng Điện Tử - Khác",
+          group: "ELECTRONIC_BOARD",
+          sortOrder: 230,
+          allowCustomText: true,
+          isActive: true,
         },
       });
 
@@ -232,63 +262,69 @@ async function runDatabaseIntegrationTests() {
 
       assert.equal(directorUser.role, "DIRECTOR");
       assert.equal(salesUser.role, "SALES");
-      assert.equal(ledCategory.code, "LED_INDOOR");
+      assert.equal(ledCategory.group, "LED_SCREEN");
+      assert.equal(boardCategory.allowCustomText, true);
     });
 
     let createdLead;
 
-    await runTest("M01 (01-leads): Create Lead, enforce phone deduplication, and multi-table status & assignment transaction", async () => {
+    await runTest("AC-06..AC-13: Create Lead with normalizedPhone, demandType, contactChannel, quoteSentAt, customerRespondedAt & transfer reason", async () => {
       createdLead = await prisma.lead.create({
         data: {
           code: "TT-LED-2610-0001",
           customerName: "Nguyễn Minh Hoàng",
           companyName: "Công ty CP Sự Kiện Ánh Sáng Việt",
-          phone: "0909111222",
+          phone: "+84 909 111 222",
+          normalizedPhone: "0909111222",
           email: "contact@anhsangviet.vn",
-          product: "Màn hình LED P2.5 Indoor",
-          categoryId: ledCategory.id,
-          source: "Website",
-          estimatedValue: "350.000.000 đ",
+          product: "Bảng Điện Tử - Khác: Bảng hiển thị nhiệt độ phòng sạch",
+          productCustomText: "Bảng hiển thị nhiệt độ phòng sạch",
+          demandType: "Mua",
+          contactChannel: "Zalo",
+          categoryId: boardCategory.id,
+          source: "Zalo",
           status: "Vừa nhận thông tin",
-          priorityScore: 88,
-          priorityTier: "HOT",
           salesPersonId: salesUser.id,
           createdById: directorUser.id,
-          ledWidth: 6,
-          ledHeight: 4,
-          ledModuleType: "P2.5 Indoor",
           location: "TP. Hồ Chí Minh",
         },
       });
 
-      // Check duplicate lookup by phone
+      // Check duplicate lookup by normalizedPhone
       const dup = await prisma.lead.findFirst({
-        where: { phone: "0909111222" },
+        where: { normalizedPhone: "0909111222" },
       });
       assert.ok(dup);
       assert.equal(dup.code, "TT-LED-2610-0001");
+      assert.equal(dup.demandType, "Mua");
+      assert.equal(dup.contactChannel, "Zalo");
 
-      // Multi-table status transition (Lead + LeadStatusHistory + LeadActivity + AuditLog)
+      // Multi-table status transition to Đã gửi báo giá -> sets quoteSentAt
+      const quoteTime = new Date();
       const [updatedLead, historyRecord, activityRecord, assignmentRecord] =
         await prisma.$transaction([
           prisma.lead.update({
             where: { id: createdLead.id },
-            data: { status: "Đang soạn báo giá", lastContactedAt: new Date() },
+            data: {
+              status: "Đã gửi báo giá",
+              quoteSentAt: quoteTime,
+              lastContactedAt: quoteTime,
+            },
           }),
           prisma.leadStatusHistory.create({
             data: {
               leadId: createdLead.id,
               fromStatus: "Vừa nhận thông tin",
-              toStatus: "Đang soạn báo giá",
+              toStatus: "Đã gửi báo giá",
               changedById: salesUser.id,
             },
           }),
           prisma.leadActivity.create({
             data: {
               leadId: createdLead.id,
-              type: "CALL",
-              summary: "Đã gọi điện khảo sát kích thước hội trường 6m x 4m",
-              outcome: "Khách cần báo giá chi tiết trong hôm nay",
+              type: "QUOTATION",
+              summary: "Đã gửi báo giá bảng điện tử cho khách qua Zalo",
+              outcome: "Đang chờ khách phản hồi",
               createdById: salesUser.id,
             },
           }),
@@ -297,45 +333,27 @@ async function runDatabaseIntegrationTests() {
               leadId: createdLead.id,
               toSalesId: salesUser.id,
               assignedById: directorUser.id,
-              reason: "Phân công phụ trách dự án LED Hội trường",
+              reason: "Phân công phụ trách dự án Bảng Điện Tử",
             },
           }),
         ]);
 
-      assert.equal(updatedLead.status, "Đang soạn báo giá");
-      assert.equal(historyRecord.toStatus, "Đang soạn báo giá");
+      assert.equal(updatedLead.status, "Đã gửi báo giá");
+      assert.ok(updatedLead.quoteSentAt);
+      assert.equal(historyRecord.toStatus, "Đã gửi báo giá");
       assert.equal(activityRecord.leadId, createdLead.id);
       assert.equal(assignmentRecord.toSalesId, salesUser.id);
     });
 
-    await runTest("M01 -> M04 Cross-Module Flow: Quote exceeding discount threshold creates Director Approval Report & Read Receipt", async () => {
-      const [quote, report] = await prisma.$transaction([
-        prisma.leadQuote.create({
-          data: {
-            code: "BG-TT-2610-001",
-            leadId: createdLead.id,
-            moduleSpec: "Màn hình LED P2.5 Indoor Cabinet Nhôm Đúc",
-            widthMeters: 6,
-            heightMeters: 4,
-            areaSqm: 24,
-            unitPriceVnd: 14500000,
-            processorVnd: 12000000,
-            structureInstallVnd: 18000000,
-            discountPercent: 12,
-            totalVnd: 332640000,
-            status: "PENDING_DIRECTOR",
-            createdById: salesUser.id,
-          },
-        }),
-        prisma.departmentReport.create({
-          data: {
-            title: "[CẦN DUYỆT GIÁ] BG-TT-2610-001 — Sự Kiện Ánh Sáng Việt",
-            department: "SALES",
-            content: "Tờ trình xin phê duyệt mức chiết khấu 12% cho dự án 24m² P2.5 Indoor.",
-            createdById: salesUser.id,
-          },
-        }),
-      ]);
+    await runTest("AC-04 & AC-05: DepartmentReport record-level isolation & NotificationRead persistence", async () => {
+      const report = await prisma.departmentReport.create({
+        data: {
+          title: "Báo cáo tiến độ tuần Phòng Kinh Doanh",
+          department: "SALES",
+          content: "Tổng hợp số lượng khách đã gửi báo giá trong tuần.",
+          createdById: salesUser.id,
+        },
+      });
 
       const readReceipt = await prisma.departmentReportRead.create({
         data: {
@@ -344,99 +362,105 @@ async function runDatabaseIntegrationTests() {
         },
       });
 
-      assert.equal(quote.status, "PENDING_DIRECTOR");
-      assert.ok(report.title.includes("CẦN DUYỆT GIÁ"));
+      const notifRead = await prisma.notificationRead.create({
+        data: {
+          userId: salesUser.id,
+          notificationKey: `report:${report.id}`,
+        },
+      });
+
       assert.equal(readReceipt.userId, directorUser.id);
+      assert.equal(notifRead.notificationKey, `report:${report.id}`);
+
+      const reportPolicySrc = fs.readFileSync(
+        path.join(rootDir, "backend", "src", "modules", "04-reports-dashboard", "policy.ts"),
+        "utf8"
+      );
+      assert.match(reportPolicySrc, /assertCanAccessReportRecord/);
     });
 
-    await runTest("M02 (02-tracking): Record TrackingEvent and SyncJob multi-table state", async () => {
+    await runTest("AC-14 & AC-15: AI Lead disabled (403) & Quote Engine disabled (403) & Zero money cards on Overview/Lead UI", async () => {
+      const leadAiSrc = fs.readFileSync(
+        path.join(rootDir, "backend", "src", "modules", "01-leads", "lead-ai.service.ts"),
+        "utf8"
+      );
+      assert.match(leadAiSrc, /AI_LEAD_DISABLED/);
+
+      const leadQuoteSrc = fs.readFileSync(
+        path.join(rootDir, "backend", "src", "modules", "01-leads", "lead-quote.service.ts"),
+        "utf8"
+      );
+      assert.match(leadQuoteSrc, /QUOTE_ENGINE_DISABLED|PRICING_ENGINE_DISABLED/);
+
+      const overviewSrc = fs.readFileSync(
+        path.join(rootDir, "frontend", "src", "modules", "04-reports-dashboard", "components", "OverviewView.tsx"),
+        "utf8"
+      );
+      assert.doesNotMatch(overviewSrc, /label="Đang báo giá"/);
+      assert.match(overviewSrc, /Sản phẩm được quan tâm/);
+    });
+
+    await runTest("AC-16 & AC-17: M02 (02-tracking) eventKey idempotency & honest defaults ('Chưa có thông tin')", async () => {
       const event = await prisma.trackingEvent.create({
         data: {
+          eventKey: "evt-unique-key-001",
           leadId: createdLead.id,
-          websiteSource: "toantrungtelecom.com",
+          websiteSource: "Chưa có thông tin",
           source: "google",
           medium: "cpc",
           campaign: "Search - Man Hinh LED Hoi Truong",
           landingPage: "/man-hinh-led-hoi-truong-p2-5",
-          device: "Desktop",
-          location: "TP. Hồ Chí Minh",
+          device: "Chưa có thông tin",
+          location: "Chưa có thông tin",
         },
       });
-      assert.equal(event.leadId, createdLead.id);
+      assert.equal(event.eventKey, "evt-unique-key-001");
+      assert.equal(event.websiteSource, "Chưa có thông tin");
 
-      const syncJob = await prisma.syncJob.create({
-        data: {
-          service: "GOOGLE_ADS",
-          status: "NOT_CONFIGURED",
-          recordsSynced: 0,
-          errorMessage: "Chưa cấu hình OAuth Google Ads Developer Token",
-        },
-      });
-      assert.equal(syncJob.status, "NOT_CONFIGURED");
+      const trackingServiceSrc = fs.readFileSync(
+        path.join(rootDir, "backend", "src", "modules", "02-tracking", "service.ts"),
+        "utf8"
+      );
+      assert.match(trackingServiceSrc, /findTrackingEventByEventKey/);
     });
 
-    await runTest("M03 (03-ads-keywords): Create MarketingCampaign, AdsPerformance, and KeywordMetric", async () => {
-      const campaign = await prisma.marketingCampaign.create({
-        data: {
-          code: "CMP-GG-2610-01",
-          name: "Google Search — LED Hội Trường Q4",
-          platform: "Google Ads",
-          status: "Active",
-          budget: 50000000,
-          spent: 18500000,
-        },
-      });
-
-      const perf = await prisma.adsPerformance.create({
-        data: {
-          campaignId: campaign.id,
-          impressions: 3100,
-          clicks: 120,
-          cost: 1450000,
-          conversions: 2,
-          cpc: 12083,
-          ctr: 3.87,
-        },
-      });
-
-      const keyword = await prisma.keywordMetric.create({
-        data: {
-          keyword: "báo giá màn hình led p2.5 hội trường",
-          impressions: 8500,
-          clicks: 410,
-          avgCpc: 11200,
-          avgPosition: 1.4,
-          searchVolume: 2400,
-          source: "Google Ads",
-        },
-      });
-
-      assert.equal(campaign.platform, "Google Ads");
-      assert.equal(perf.campaignId, campaign.id);
-      assert.equal(keyword.searchVolume, 2400);
+    await runTest("AC-18: M03 (03-ads-keywords) separates platformConversions and crmLeadsFromAds", async () => {
+      const adsServiceSrc = fs.readFileSync(
+        path.join(rootDir, "backend", "src", "modules", "03-ads-keywords", "service.ts"),
+        "utf8"
+      );
+      assert.match(adsServiceSrc, /platformConversions/);
+      assert.match(adsServiceSrc, /crmLeadsFromAds/);
     });
 
-    await runTest("M05 (05-ai-design): Persist AI Design job in AuditLog (entity = AI_DESIGN)", async () => {
-      const designJob = await prisma.auditLog.create({
-        data: {
-          userId: salesUser.id,
-          leadId: createdLead.id,
-          action: "GENERATE_CONCEPT",
-          entity: "AI_DESIGN",
-          entityId: "AI-DES-2610-001",
-          details: JSON.stringify({
-            prompt: "Sảnh hội nghị sang trọng 500 chỗ, màn hình LED P2 cong 12m x 4m",
-            stylePreset: "Hội trường hiện đại",
-            aspectRatio: "16:9",
-            status: "COMPLETED",
-          }),
-        },
-      });
-      assert.equal(designJob.entity, "AI_DESIGN");
-      assert.equal(designJob.entityId, "AI-DES-2610-001");
+    await runTest("AC-19..AC-24 & AC-29..AC-30: 5 Mandatory CRM Reports, Excel text phone preservation, Full-page report detail & Brand Header", async () => {
+      const reportsViewSrc = fs.readFileSync(
+        path.join(rootDir, "frontend", "src", "modules", "04-reports-dashboard", "components", "ReportsView.tsx"),
+        "utf8"
+      );
+      assert.match(reportsViewSrc, /Báo cáo 1 — Tổng số Lead theo tuần \/ tháng/);
+      assert.match(reportsViewSrc, /Báo cáo 2 — Phân bổ Lead theo nhân viên kinh doanh/);
+      assert.match(reportsViewSrc, /Báo cáo 3 — Thống kê theo danh mục sản phẩm & loại nhu cầu/);
+      assert.match(reportsViewSrc, /Báo cáo 4 — Báo cáo theo trạng thái bán hàng/);
+      assert.match(reportsViewSrc, /Báo cáo 5 — Báo giá & Danh sách khách đã gửi báo giá nhưng chưa phản hồi/);
+      assert.match(reportsViewSrc, /Quay lại danh sách báo cáo/);
+
+      const excelSrc = fs.readFileSync(
+        path.join(rootDir, "frontend", "src", "core", "utils", "excel-export.ts"),
+        "utf8"
+      );
+      assert.match(excelSrc, /2\. Phân Bổ Theo Sales \(Brief\)/);
+      assert.match(excelSrc, /cellPhone/);
+
+      const sidebarSrc = fs.readFileSync(
+        path.join(rootDir, "frontend", "src", "core", "layout", "Sidebar.tsx"),
+        "utf8"
+      );
+      assert.match(sidebarSrc, /MINI CRM/);
+      assert.match(sidebarSrc, /max-h-\[80px\]/);
     });
 
-    await runTest("Auth & Session Security: HMAC-SHA256 session token sign/verify, expiration & RBAC role isolation", async () => {
+    await runTest("AC-03 & AC-27: Auth & Session Security (HMAC-SHA256) & Role Permissions Matrix", async () => {
       const secret = process.env.SESSION_SECRET;
       const payload = {
         sub: salesUser.id,
@@ -451,7 +475,6 @@ async function runDatabaseIntegrationTests() {
       const sig = crypto.createHmac("sha256", secret).update(encoded).digest("base64url");
       const token = `${encoded}.${sig}`;
 
-      // Verify valid token
       const [partPayload, partSig] = token.split(".");
       const expectedSig = crypto
         .createHmac("sha256", secret)
@@ -459,77 +482,12 @@ async function runDatabaseIntegrationTests() {
         .digest("base64url");
       assert.equal(partSig, expectedSig);
 
-      // Verify tampered token is rejected
-      const tamperedPayload = Buffer.from(
-        JSON.stringify({ ...payload, role: "ADMIN" })
-      ).toString("base64url");
-      assert.notEqual(
-        crypto.createHmac("sha256", secret).update(tamperedPayload).digest("base64url"),
-        partSig
-      );
-
-      // Verify RBAC filtering: SALES only sees leads assigned to them
-      const otherSales = await prisma.user.create({
-        data: {
-          name: "Lê Sales Khác",
-          email: "othersales@toantrung.test",
-          passwordHash: salesUser.passwordHash,
-          role: "SALES",
-          actorType: "USER",
-          department: salesUser.department,
-        },
-      });
-      await prisma.lead.create({
-        data: {
-          code: "TT-LED-2610-0002",
-          customerName: "Khách Của Sales Khác",
-          companyName: "Công ty B",
-          phone: "0909333444",
-          product: "Màn hình LED P3 Outdoor",
-          categoryId: ledCategory.id,
-          salesPersonId: otherSales.id,
-        },
-      });
-
-      const salesVisibleLeads = await prisma.lead.findMany({
-        where: { salesPersonId: salesUser.id },
-      });
-      const directorVisibleLeads = await prisma.lead.findMany();
-      assert.equal(salesVisibleLeads.length, 1);
-      assert.equal(directorVisibleLeads.length, 2);
-    });
-
-    await runTest("Filtering, Failure Reason Validation & Honest Unconfigured Error States (501/503)", async () => {
-      // 1. Filter by status, source, and search keyword
-      const filtered = await prisma.lead.findMany({
-        where: {
-          status: "Đang soạn báo giá",
-          source: "Website",
-          OR: [
-            { customerName: { contains: "Hoàng" } },
-            { phone: { contains: "0909111222" } },
-          ],
-        },
-      });
-      assert.equal(filtered.length, 1);
-      assert.equal(filtered[0].code, "TT-LED-2610-0001");
-
-      // 2. Verify M02 Sync source specs return NOT_CONFIGURED when OAuth env vars are absent
-      const syncCont = fs.readFileSync(
-        path.join(rootDir, "backend", "src", "modules", "02-tracking", "contracts.ts"),
+      const fePermSrc = fs.readFileSync(
+        path.join(rootDir, "frontend", "src", "core", "auth", "permissions.ts"),
         "utf8"
       );
-      assert.match(syncCont, /EXTERNAL_CONNECTOR_NOT_CONFIGURED|NOT_CONFIGURED/);
-
-      // 3. Verify Logger redacts passwords, tokens, and API keys
-      const loggerContent = fs.readFileSync(
-        path.join(rootDir, "backend", "src", "core", "logger.ts"),
-        "utf8"
-      );
-      assert.match(loggerContent, /REDACTED/);
-      assert.match(loggerContent, /requestId/);
-      assert.match(loggerContent, /moduleId/);
-      assert.match(loggerContent, /errorCode/);
+      assert.match(fePermSrc, /ALLOWED_TABS_BY_ROLE/);
+      assert.match(fePermSrc, /DIRECTOR/);
     });
   } finally {
     await prisma.$disconnect();

@@ -1,15 +1,19 @@
 import { prisma } from "@/src/core/db/prisma";
 
 export async function queryCampaignsAndKeywords() {
-  const [campaigns, keywords] = await Promise.all([
+  const [campaigns, keywords, crmLeadsBySource] = await Promise.all([
     prisma.marketingCampaign.findMany({
       orderBy: { createdAt: "desc" },
     }),
     prisma.keywordMetric.findMany({
       orderBy: { clicks: "desc" },
     }),
+    prisma.lead.groupBy({
+      by: ["source"],
+      _count: { _all: true },
+    }),
   ]);
-  return { campaigns, keywords };
+  return { campaigns, keywords, crmLeadsBySource };
 }
 
 export async function findCampaignByCode(code: string) {

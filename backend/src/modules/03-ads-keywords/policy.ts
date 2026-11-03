@@ -1,17 +1,9 @@
 import type { UserSession } from "@/src/core/auth/auth";
+import { canAccessAdsModule } from "@/src/core/auth/permissions";
 import { AppError } from "@/src/core/http";
 
 export function canUserViewAds(user: UserSession): boolean {
-  return (
-    user.role === "ADS" ||
-    user.department === "ADS" ||
-    user.role === "MARKETING" ||
-    user.department === "MARKETING" ||
-    user.actorType === "ADMIN" ||
-    user.actorType === "DIRECTOR" ||
-    user.role === "ADMIN" ||
-    user.role === "DIRECTOR"
-  );
+  return canAccessAdsModule(user);
 }
 
 export function canUserManageAds(user: UserSession): boolean {
@@ -29,7 +21,7 @@ export function assertCanViewAds(user: UserSession): void {
   if (!canUserViewAds(user)) {
     throw new AppError(
       403,
-      "Quyền bị từ chối: Tài khoản thuộc bộ phận khác không được truy cập API dữ liệu phòng Quảng cáo (ADS)",
+      "Quyền bị từ chối: Tài khoản thuộc bộ phận khác không được truy cập dữ liệu Quảng cáo & Từ khóa.",
       "FORBIDDEN"
     );
   }

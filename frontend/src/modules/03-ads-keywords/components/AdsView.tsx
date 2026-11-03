@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
@@ -43,6 +43,9 @@ interface AdsApiResponse {
     totalImpressions: number;
     avgCtr: string;
     avgCpc: string | number;
+    platformConversions?: number;
+    crmLeadsFromAds?: number;
+    totalCrmLeads?: number;
   };
 }
 
@@ -83,10 +86,6 @@ interface CreateCampaignModalProps {
   onCreated: (message: string) => void;
 }
 
-/**
- * Isolated Campaign Form Modal: owns all input states locally so typing campaign name,
- * code, or budget never triggers re-renders of the AdsView KPI cards or data tables.
- */
 const CreateCampaignModal = React.memo(function CreateCampaignModal({
   open,
   onClose,
@@ -192,7 +191,7 @@ const CreateCampaignModal = React.memo(function CreateCampaignModal({
             type="text"
             required
             data-autofocus
-            placeholder="VD: Chiến dịch Màn hình LED P2.5 Hội trường Q4"
+            placeholder="VD: Chiến dịch Màn hình LED Hội trường Q4"
             value={formName}
             onChange={(e) => setFormName(e.target.value)}
             className="crm-input"
@@ -233,9 +232,9 @@ const CreateCampaignModal = React.memo(function CreateCampaignModal({
               onChange={(e) => setFormStatus(e.target.value)}
               className="crm-select"
             >
-              <option value="Active">Đang chạy (Active)</option>
-              <option value="Paused">Tạm dừng (Paused)</option>
-              <option value="Completed">Hoàn thành (Completed)</option>
+              <option value="Active">Đang chạy</option>
+              <option value="Paused">Tạm dừng</option>
+              <option value="Completed">Hoàn thành</option>
             </select>
           </div>
         </div>
@@ -288,8 +287,6 @@ export function AdsView() {
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
-
-  // Modal tạo chiến dịch mới dành riêng cho ADS & ADMIN (state form được tách riêng trong CreateCampaignModal)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   const showToast = useCallback((msg: string) => {
@@ -311,7 +308,6 @@ export function AdsView() {
       setData(json.data);
       setHasLoaded(true);
     } catch (err) {
-      console.warn("Analytics error:", err);
       setLoadError(
         err instanceof Error
           ? err.message
@@ -334,9 +330,7 @@ export function AdsView() {
     hasLoaded && summary && (campaigns.length > 0 || keywords.length > 0)
   );
 
-  // Filter campaigns by date, platform, specific campaign, status, and search
   const filteredCampaigns = useMemo(() => {
-    // Calendar-day cutoff (new Date() is allowed by react-hooks/purity, Date.now() is not)
     let cutoff: Date | null = null;
     if (dateRange === "7d" || dateRange === "30d") {
       cutoff = new Date();
@@ -402,7 +396,6 @@ export function AdsView() {
     });
   }, [keywords, searchTerm, platformFilter]);
 
-  // Platform spend aggregation from filtered campaigns
   const platformStats = useMemo(() => {
     const map: Record<string, { budget: number; spent: number; count: number }> =
       {};
@@ -454,7 +447,7 @@ export function AdsView() {
       <div className="space-y-6">
         <PageHeader
           title="Quảng cáo & Từ khóa"
-          description="Theo dõi chi tiêu đa kênh, tỷ lệ giải ngân ngân sách và hiệu quả chuyển đổi từ khóa tìm kiếm."
+          description="Theo dõi hiệu suất chiến dịch quảng cáo, từ khóa tìm kiếm và đối chiếu Lead thực tế ghi nhận trong CRM."
         />
         <PageSkeleton cards={4} rows={6} />
       </div>
@@ -466,7 +459,7 @@ export function AdsView() {
       <div className="space-y-6">
         <PageHeader
           title="Quảng cáo & Từ khóa"
-          description="Theo dõi chi tiêu đa kênh, tỷ lệ giải ngân ngân sách và hiệu quả chuyển đổi từ khóa tìm kiếm."
+          description="Theo dõi hiệu suất chiến dịch quảng cáo, từ khóa tìm kiếm và đối chiếu Lead thực tế ghi nhận trong CRM."
         />
         <ErrorState message={loadError} onRetry={fetchAdsData} />
       </div>
@@ -475,13 +468,11 @@ export function AdsView() {
 
   return (
     <div className="space-y-6">
-      {/* Toast */}
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
 
-      {/* Header */}
       <PageHeader
         title="Quảng cáo & Từ khóa"
-        description="Theo dõi chi tiêu đa kênh, tỷ lệ giải ngân ngân sách và hiệu quả chuyển đổi từ khóa tìm kiếm."
+        description="Theo dõi hiệu suất chiến dịch đa kênh, từ khóa tìm kiếm và phân biệt chuyển đổi nền tảng Ads với Lead thực tế trong CRM."
         actions={
           <>
             {!canManageAds && (
@@ -509,18 +500,15 @@ export function AdsView() {
                       totalImpressions: summary?.totalImpressions || 0,
                     },
                   });
-                  showToast(
-                    "Đã xuất Báo cáo Quảng cáo & Từ khóa (.xlsx — 3 Sheet)"
-                  );
-                } catch (err) {
-                  console.error("Lỗi xuất Excel Ads:", err);
+                  showToast("Đã xuất Báo cáo Quảng cáo & Từ khóa (.xlsx) thành công");
+                } catch {
                   showToast("Không thể xuất file Excel. Vui lòng thử lại.");
                 } finally {
                   setIsExportingExcel(false);
                 }
               }}
             >
-              Export (.xlsx)
+              Xuất Excel
             </Button>
 
             {canManageAds && (
@@ -539,7 +527,7 @@ export function AdsView() {
         }
       />
 
-      {/* Analytics Filter Bar (Date, Platform, Campaign, Status, Search) */}
+      {/* Analytics Filter Bar */}
       <div className="crm-card p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5 flex-1">
           <SearchInput
@@ -615,10 +603,10 @@ export function AdsView() {
         </div>
       </div>
 
-      {/* 4 KPI Cards (No fake fallback numbers!) */}
+      {/* 4 KPI Cards — Explicitly Distinguishing Platform Conversions vs CRM Leads (AC-18) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard
-          label="Spend (Chi tiêu)"
+          label="Chi phí quảng cáo"
           value={
             hasRealData && summary
               ? `${summary.totalSpent.toLocaleString("vi-VN")} đ`
@@ -635,7 +623,7 @@ export function AdsView() {
         />
 
         <StatCard
-          label="Clicks & Hiển thị"
+          label="Lượt nhấp & Hiển thị"
           value={
             hasRealData && summary
               ? summary.totalClicks.toLocaleString("vi-VN")
@@ -646,34 +634,41 @@ export function AdsView() {
           iconTone="emerald"
           note={
             hasRealData && summary
-              ? `${summary.totalImpressions.toLocaleString("vi-VN")} lượt hiển thị · ${campaigns.length} chiến dịch`
+              ? `${summary.totalImpressions.toLocaleString("vi-VN")} lượt hiển thị · CTR TB: ${summary.avgCtr}`
               : "Chưa ghi nhận lượt nhấp"
           }
         />
 
         <StatCard
-          label="CTR trung bình"
-          value={hasRealData && summary ? summary.avgCtr : null}
+          label="Chuyển đổi nền tảng Ads"
+          value={
+            hasRealData && summary
+              ? `${(summary.platformConversions ?? 0).toLocaleString("vi-VN")} lượt`
+              : null
+          }
           isEmpty={!hasRealData}
           icon={Percent}
           iconTone="slate"
-          note="Tỷ lệ nhấp / hiển thị từ từ khóa theo dõi"
+          note="Số lượt chuyển đổi do nền tảng quảng cáo báo cáo (tách biệt với Lead CRM)"
         />
 
         <StatCard
-          label="CPC trung bình"
-          value={hasRealData && summary ? String(summary.avgCpc) : null}
+          label="Lead thực tế ghi nhận CRM"
+          value={
+            hasRealData && summary
+              ? `${(summary.crmLeadsFromAds ?? 0).toLocaleString("vi-VN")} Lead`
+              : null
+          }
           isEmpty={!hasRealData}
           icon={TrendingUp}
           iconTone="amber"
-          note="Chi phí trung bình trên mỗi lượt click"
+          note={`Đã tạo hồ sơ thực tế trong CRM (CPC TB: ${summary?.avgCpc || "0 đ"})`}
         />
       </div>
 
-      {/* Simple Restrained Visual Section */}
+      {/* Visual Spend Breakdown */}
       {filteredCampaigns.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          {/* Platform Spend Share */}
           <div className="lg:col-span-5 crm-card p-5 space-y-4">
             <SectionHeader
               title="Phân bổ chi tiêu theo nền tảng"
@@ -710,7 +705,6 @@ export function AdsView() {
             </div>
           </div>
 
-          {/* Budget vs Actual Spend */}
           <div className="lg:col-span-7 crm-card p-5 space-y-4">
             <SectionHeader
               title="Tiến độ giải ngân chiến dịch"
@@ -760,7 +754,7 @@ export function AdsView() {
       {/* Campaign Performance Table */}
       <div className="crm-card overflow-hidden">
         <CardHeader
-          title="Campaign Performance"
+          title="Hiệu suất chiến dịch quảng cáo"
           description="Nền tảng chạy, hạn mức ngân sách, tiến độ giải ngân và trạng thái vận hành"
           count={filteredCampaigns.length}
         />
@@ -872,7 +866,7 @@ export function AdsView() {
       {/* Keyword Performance Table */}
       <div className="crm-card overflow-hidden">
         <CardHeader
-          title="Keyword Performance"
+          title="Hiệu suất từ khóa tìm kiếm"
           description="Hiệu suất từ khóa Google Ads & Search Console, vị trí trung bình và cảnh báo CPC cao"
           count={filteredKeywords.length}
         />
@@ -891,7 +885,7 @@ export function AdsView() {
                   <th>Từ khóa</th>
                   <th>Nguồn</th>
                   <th className="num">Hiển thị</th>
-                  <th className="num">Clicks</th>
+                  <th className="num">Lượt nhấp</th>
                   <th className="num">CTR</th>
                   <th className="num">CPC TB</th>
                   <th className="text-center">Vị trí TB</th>
@@ -954,7 +948,6 @@ export function AdsView() {
         )}
       </div>
 
-      {/* Create Campaign Modal (isolated state — typing never re-renders AdsView) */}
       <CreateCampaignModal
         open={isCreateModalOpen}
         onClose={handleCloseCreateModal}

@@ -1,7 +1,11 @@
 import { writeFile, mkdir } from "fs/promises";
 import crypto from "crypto";
 import path from "path";
-import type { UserSession } from "@/src/core/auth/auth";
+import {
+  canUserAccessLeadRecord,
+  type UserSession,
+} from "@/src/core/auth/auth";
+import { prisma } from "@/src/core/db/prisma";
 import { getUploadMaxBytes } from "@/src/core/env";
 import { AppError } from "@/src/core/http";
 import { attachUploadedFileToLead } from "@/src/modules/01-leads/public";
@@ -76,6 +80,62 @@ export function hasValidFileSignature(ext: string, buf: Buffer): boolean {
   }
 }
 
+export async function verifyAttachmentAccess(
+  user: UserSession | null,
+  params: { attachmentId?: string | null; fileUrl?: string | null }
+) {
+  if (!user) {
+    throw new AppError(401, "Yêu cầu đăng nhập để xem tệp đính kèm", "UNAUTHORIZED");
+  }
+
+  const attachment = await prisma.leadAttachment.findFirst({
+    where: params.attachmentId
+      ? { id: params.attachmentId }
+      : params.fileUrl
+        ? { fileUrl: params.fileUrl }
+        : { id: "__none__" },
+    include: {
+      lead: {
+        select: {
+          id: true,
+          code: true,
+          salesPersonId: true,
+          createdById: true,
+        },
+      },
+    },
+  });
+
+  if (!attachment) {
+    throw new AppError(404, "Không tìm thấy tệp đính kèm", "NOT_FOUND");
+  }
+
+  if (
+    !canUserAccessLeadRecord(user, {
+      salesPersonId: attachment.lead.salesPersonId,
+      createdById: attachment.lead.createdById,
+    })
+  ) {
+    throw new AppError(
+      403,
+      "Bạn không có quyền truy cập tệp đính kèm của hồ sơ Lead này",
+      "FORBIDDEN"
+    );
+  }
+
+  return {
+    attachment: {
+      id: attachment.id,
+      leadId: attachment.leadId,
+      fileName: attachment.fileName,
+      fileUrl: attachment.fileUrl,
+      fileSize: attachment.fileSize,
+      fileType: attachment.fileType,
+      createdAt: attachment.createdAt.toISOString(),
+    },
+  };
+}
+
 export async function handleFileUpload(
   user: UserSession | null,
   formData: FormData
@@ -89,6 +149,23 @@ export async function handleFileUpload(
 
   if (!file) {
     throw new AppError(400, "Vui lòng chọn file tải lên", "NO_FILE");
+  }
+
+  if (leadId) {
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { id: true, salesPersonId: true, createdById: true },
+    });
+    if (!lead) {
+      throw new AppError(404, "Không tìm thấy hồ sơ Lead cần đính kèm tệp", "NOT_FOUND");
+    }
+    if (!canUserAccessLeadRecord(user, lead)) {
+      throw new AppError(
+        403,
+        "Bạn không có quyền đính kèm tệp vào hồ sơ Lead của nhân sự khác",
+        "FORBIDDEN"
+      );
+    }
   }
 
   const ext = path.extname(file.name).toLowerCase();

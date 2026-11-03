@@ -11,7 +11,10 @@ import { countDesignAuditActions } from "./repository";
 
 export async function listDesignOrders(user: UserSession | null) {
   assertCanUseAiDesign(user);
-  return getGeminiConfigStatus();
+  const status = getGeminiConfigStatus();
+  return {
+    configured: status.configured,
+  };
 }
 
 export async function generateDesignOrder(
@@ -24,7 +27,7 @@ export async function generateDesignOrder(
   if (!apiKey) {
     throw new AppError(
       503,
-      "Chưa cấu hình GEMINI_API_KEY trong môi trường máy chủ.",
+      "Dịch vụ hỗ trợ thiết kế hiện chưa được kích hoạt. Vui lòng liên hệ quản trị viên.",
       "AI_NOT_CONFIGURED"
     );
   }
@@ -77,7 +80,7 @@ export async function generateDesignOrder(
 
   const instruction =
     mode === "storyboard"
-      ? `Bạn là chuyên gia quảng cáo màn hình LED của Công ty Toàn Trung Telecom. Viết storyboard tiếng Việt cho video 15 giây với 4-6 cảnh quảng bá thương hiệu/sản phẩm LED Toàn Trung. Mỗi cảnh một dòng, nêu thời lượng, hình ảnh/chuyển động và chữ hiển thị trên màn hình. Tỷ lệ ${aspectRatio || "16:9"}. Ý tưởng: ${prompt}`
+      ? `Bạn là chuyên gia quảng cáo màn hình LED của Công ty Toàn Trung Telecom. Viết kịch bản phân cảnh tiếng Việt cho video 15 giây với 4-6 cảnh quảng bá thương hiệu/sản phẩm LED Toàn Trung. Mỗi cảnh một dòng, nêu thời lượng, hình ảnh/chuyển động và chữ hiển thị trên màn hình. Tỷ lệ ${aspectRatio || "16:9"}. Ý tưởng: ${prompt}`
       : mode === "mockup"
         ? `Dùng ảnh công trình đính kèm làm ảnh gốc và tạo ảnh phối cảnh thực tế, giữ nguyên bố cục kiến trúc, thêm ${mockupType || "màn hình LED Toàn Trung"} tại vị trí hợp lý. Yêu cầu: ${prompt}`
         : `Tạo một ảnh thiết kế quảng cáo màn hình LED chất lượng cao của Toàn Trung Telecom. Nội dung: ${prompt}. Tỷ lệ ${aspectRatio || "16:9"}, kích thước thực tế ${widthMeters || "8"}m x ${heightMeters || "4.5"}m. Ưu tiên chữ tiếng Việt rõ nét, độ tương phản cao phù hợp hiển thị bảng điện tử LED.`;
@@ -95,30 +98,30 @@ export async function generateDesignOrder(
     if (result.errorType === "TIMEOUT") {
       throw new AppError(
         502,
-        "Gemini phản hồi quá lâu. Vui lòng thử lại.",
+        "Hệ thống xử lý thiết kế phản hồi quá lâu. Vui lòng thử lại.",
         "AI_REQUEST_FAILED"
       );
     }
     throw new AppError(
       502,
-      `Google AI không xử lý được yêu cầu (${result.lastError || "Lỗi kết nối"}). Vui lòng kiểm tra lại hạn mức tài khoản Google AI Studio.`,
+      "Dịch vụ thiết kế tạm thời gián đoạn. Vui lòng thử lại sau hoặc liên hệ quản trị viên.",
       "AI_PROVIDER_ERROR"
     );
   }
 
   if (imageMode && !result.imageDataUrl) {
     return {
-      text: result.text || "Đã tạo ý tưởng market thành công",
+      text: result.text || "Đã tạo ý tưởng thiết kế thành công",
       imageDataUrl: null,
-      model: result.usedModel,
-      note: "Model trả về nội dung tư vấn thiết kế do chưa bật quyền Image Gen trên tài khoản.",
+      model: "ToanTrung-Design-Assistant",
+      note: "Hệ thống trả về nội dung tư vấn thiết kế.",
     };
   }
 
   if (mode === "storyboard" && !result.text) {
     throw new AppError(
       502,
-      "Gemini không trả về nội dung. Vui lòng thử lại.",
+      "Không nhận được nội dung kịch bản. Vui lòng thử lại.",
       "AI_RESPONSE_EMPTY"
     );
   }
@@ -126,7 +129,7 @@ export async function generateDesignOrder(
   return {
     text: result.text,
     imageDataUrl: result.imageDataUrl,
-    model: result.usedModel,
+    model: "ToanTrung-Design-Assistant",
   };
 }
 

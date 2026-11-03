@@ -23,9 +23,6 @@ const CreateUserSchema = z.object({
   position: z.string().trim().max(80).optional(),
   role: z.string().trim().optional(),
   phone: z.string().optional().nullable(),
-  address: z.string().optional().nullable(),
-  hometown: z.string().optional().nullable(),
-  achievements: z.string().optional().nullable(),
   avatar: z.string().optional().nullable(),
 });
 
@@ -38,22 +35,16 @@ const AdminUpdateUserSchema = z.object({
   position: z.string().trim().max(80).optional(),
   decisionId: z.string().trim().optional().nullable(),
   phone: z.string().trim().max(20).optional().nullable(),
-  address: z.string().trim().max(300).optional().nullable(),
-  hometown: z.string().trim().max(200).optional().nullable(),
-  achievements: z.string().trim().max(5000).optional().nullable(),
   avatar: z.string().trim().optional().nullable(),
   isActive: z.boolean().optional(),
   newPassword: z.string().optional().nullable(),
 });
 
 const UpdateProfileSchema = z.object({
-  name: z.string().trim().min(2, "Họ và tên tối thiểu 2 ký tự").max(100),
+  name: z.string().trim().min(2, "Họ và tên tối thiểu 2 ký tự").max(100).optional(),
   phone: z.string().trim().max(20).optional().nullable(),
-  email: z.string().trim().email("Email / Gmail không hợp lệ"),
-  address: z.string().trim().max(300).optional().nullable(),
-  hometown: z.string().trim().max(200).optional().nullable(),
+  email: z.string().trim().email("Email công việc không hợp lệ").optional(),
   avatar: z.string().trim().optional().nullable(),
-  achievements: z.string().trim().max(5000).optional().nullable(),
   currentPassword: z.string().optional().nullable(),
   newPassword: z.string().optional().nullable(),
 });
@@ -95,9 +86,6 @@ export async function listUsers(
       appointedDecisionCode: true,
       initials: true,
       avatar: true,
-      address: isPrivileged,
-      hometown: isPrivileged,
-      achievements: true,
       isActive: true,
       createdAt: true,
     },
@@ -111,7 +99,7 @@ export async function createUserByAdmin(session: UserSession, body: unknown) {
   if (session.actorType !== "ADMIN" && session.role !== "ADMIN") {
     throw new AppError(
       403,
-      "Chỉ Tác nhân ADMIN mới có quyền tạo tài khoản hệ thống",
+      "Chỉ Quản trị viên (Admin) mới có quyền tạo tài khoản nhân sự",
       "FORBIDDEN"
     );
   }
@@ -148,7 +136,7 @@ export async function createUserByAdmin(session: UserSession, body: unknown) {
   ) {
     throw new AppError(
       403,
-      "Theo chuẩn ATTT: Tài khoản USER mới khởi tạo ở cấp 'Nhân viên'. Để cấp quyền Trưởng phòng / Trưởng ban, cần căn cứ vào Thông báo chúc mừng do Giám đốc ký duyệt!",
+      "Tài khoản nhân sự mới khởi tạo ở cấp 'Nhân viên'. Để cấp quyền Trưởng phòng / Trưởng ban, cần căn cứ vào Quyết định bổ nhiệm do Giám đốc ký duyệt.",
       "DIRECTOR_SIGNATURE_REQUIRED"
     );
   }
@@ -170,9 +158,6 @@ export async function createUserByAdmin(session: UserSession, body: unknown) {
       department: resolved.department,
       position: resolved.position,
       phone: data.phone || null,
-      address: data.address || null,
-      hometown: data.hometown || null,
-      achievements: data.achievements || null,
       avatar: data.avatar || null,
       initials,
     },
@@ -186,9 +171,6 @@ export async function createUserByAdmin(session: UserSession, body: unknown) {
       position: true,
       appointedDecisionCode: true,
       phone: true,
-      address: true,
-      hometown: true,
-      achievements: true,
       avatar: true,
       initials: true,
       isActive: true,
@@ -212,7 +194,7 @@ export async function createUserByAdmin(session: UserSession, body: unknown) {
   });
 
   return {
-    message: `Đã tạo tài khoản ${newUser.name} [Tác nhân: ${newUser.actorType} · Phòng: ${newUser.department}] thành công`,
+    message: `Đã tạo tài khoản ${newUser.name} (${newUser.department}) thành công`,
     user: newUser,
   };
 }
@@ -226,7 +208,7 @@ export async function updateUserByAdmin(
   if (!isAdmin && session.userId !== targetUserId) {
     throw new AppError(
       403,
-      "Chỉ Tác nhân ADMIN mới có quyền chỉnh sửa và phân quyền tài khoản nhân sự",
+      "Chỉ Quản trị viên (Admin) mới có quyền chỉnh sửa và phân quyền tài khoản nhân sự",
       "FORBIDDEN"
     );
   }
@@ -297,7 +279,7 @@ export async function updateUserByAdmin(
     if (!signedDecision) {
       throw new AppError(
         403,
-        `Theo quy định ATTT: Không thể tự nâng chức vụ "${resolved.position}" khi chưa có Thông báo chúc mừng / Quyết định bổ nhiệm được Giám đốc ký duyệt!`,
+        `Không thể nâng chức vụ "${resolved.position}" khi chưa có Quyết định bổ nhiệm được Giám đốc ký duyệt.`,
         "DIRECTOR_SIGNATURE_REQUIRED"
       );
     }
@@ -351,10 +333,7 @@ export async function updateUserByAdmin(
       position: resolved.position,
       appointedDecisionCode,
       phone: data.phone || null,
-      address: data.address || null,
-      hometown: data.hometown || null,
-      achievements: data.achievements || null,
-      avatar: data.avatar || null,
+      avatar: data.avatar !== undefined ? data.avatar || null : targetUser.avatar,
       initials,
       ...(typeof data.isActive === "boolean" && isAdmin
         ? { isActive: data.isActive }
@@ -371,9 +350,6 @@ export async function updateUserByAdmin(
       position: true,
       appointedDecisionCode: true,
       phone: true,
-      address: true,
-      hometown: true,
-      achievements: true,
       avatar: true,
       initials: true,
       isActive: true,
@@ -428,9 +404,6 @@ export async function getUserOwnProfile(session: UserSession | null) {
       appointedDecisionCode: true,
       initials: true,
       avatar: true,
-      address: true,
-      hometown: true,
-      achievements: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -464,14 +437,10 @@ export async function updateUserOwnProfile(
     name,
     phone,
     email,
-    address,
-    hometown,
     avatar,
-    achievements,
     currentPassword,
     newPassword,
   } = parsed.data;
-  const normalizedEmail = email.toLowerCase();
 
   const dbUser = await prisma.user.findUnique({
     where: { id: session.userId },
@@ -480,6 +449,9 @@ export async function updateUserOwnProfile(
   if (!dbUser) {
     throw new AppError(404, "Không tìm thấy người dùng", "NOT_FOUND");
   }
+
+  const nextName = name ? name.trim() : dbUser.name;
+  const normalizedEmail = email ? email.trim().toLowerCase() : dbUser.email.toLowerCase();
 
   if (normalizedEmail !== dbUser.email.toLowerCase()) {
     const existing = await prisma.user.findUnique({
@@ -521,22 +493,19 @@ export async function updateUserOwnProfile(
     newPasswordHash = await bcrypt.hash(newPassword.trim(), 10);
   }
 
-  const words = name.trim().split(/\s+/).filter(Boolean);
+  const words = nextName.split(/\s+/).filter(Boolean);
   const initials =
     words.length >= 2
       ? `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase()
-      : name.substring(0, 2).toUpperCase() || "TT";
+      : nextName.substring(0, 2).toUpperCase() || "TT";
 
   const updatedUser = await prisma.user.update({
     where: { id: session.userId },
     data: {
-      name,
-      phone: phone || null,
+      name: nextName,
+      phone: phone !== undefined ? phone || null : dbUser.phone,
       email: normalizedEmail,
-      address: address || null,
-      hometown: hometown || null,
-      avatar: avatar || null,
-      achievements: achievements || null,
+      avatar: avatar !== undefined ? avatar || null : dbUser.avatar,
       initials,
       ...(newPasswordHash ? { passwordHash: newPasswordHash } : {}),
     },
@@ -552,9 +521,6 @@ export async function updateUserOwnProfile(
       appointedDecisionCode: true,
       initials: true,
       avatar: true,
-      address: true,
-      hometown: true,
-      achievements: true,
       updatedAt: true,
     },
   });
@@ -577,8 +543,8 @@ export async function updateUserOwnProfile(
 
   return {
     message: newPasswordHash
-      ? "Đã cập nhật hồ sơ cá nhân và đổi mật khẩu thành công!"
-      : "Đã cập nhật thông tin hồ sơ cá nhân thành công!",
+      ? "Đã đổi mật khẩu tài khoản thành công!"
+      : "Đã cập nhật thông tin cá nhân thành công!",
     user: updatedUser,
     cookieOptions: getSessionCookieOptions(newToken),
   };

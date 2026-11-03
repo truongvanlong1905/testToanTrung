@@ -1,11 +1,8 @@
-﻿"use client";
+"use client";
 
 import React, { useEffect, useState } from "react";
 import {
   Sparkles,
-  Video,
-  Box,
-  Image as ImageIcon,
   Download,
   Upload,
   Layers,
@@ -13,11 +10,11 @@ import {
   AlertCircle,
   Tv,
   KeyRound,
+  Info,
 } from "lucide-react";
-import { DesignMode, AiConfigStatus, AiModelConfig, DesignJobItem } from "../types";
+import { DesignMode, AiConfigStatus, DesignJobItem } from "../types";
 import { cn } from "@/src/core/utils/utils";
 import { PageHeader } from "@/src/core/ui/page-header";
-import { CardHeader } from "@/src/core/ui/card";
 import { Button } from "@/src/core/ui/button";
 import { StatusBadge } from "@/src/core/ui/badge";
 import { EmptyState } from "@/src/core/ui/feedback-states";
@@ -28,12 +25,11 @@ export function AiDesignView() {
   const [activeTab, setActiveTab] = useState<DesignMode>("banner");
   const [aiConfigStatus, setAiConfigStatus] =
     useState<AiConfigStatus>("checking");
-  const [aiModels, setAiModels] = useState<AiModelConfig | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
   // 1. Banner LED State
   const [prompt, setPrompt] = useState(
-    "Thiết kế banner màn hình LED P2.5 hội nghị tri ân khách hàng kỷ niệm 15 năm thành lập, phong cách hiện đại sang trọng, tông xanh navy đậm và điểm nhấn ánh sáng tinh tế"
+    "Thiết kế banner màn hình LED P2.5 hội nghị tri ân khách hàng kỷ niệm 15 năm thành lập, phong cách hiện đại sang trọng, tông xanh đậm và điểm nhấn ánh sáng tinh tế"
   );
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [widthMeters, setWidthMeters] = useState("8.0");
@@ -52,11 +48,10 @@ export function AiDesignView() {
   // 3. Mockup State
   const [mockupFile, setMockupFile] = useState<File | null>(null);
   const [mockupPreviewUrl, setMockupPreviewUrl] = useState<string | null>(null);
-  const [mockupType, setMockupType] = useState("LED ngoài trời P4 chống nước");
+  const [mockupType, setMockupType] = useState("Màn hình LED ngoài trời");
   const [isCompositing, setIsCompositing] = useState(false);
   const [mockupResult, setMockupResult] = useState<string | null>(null);
 
-  // Session Recent Jobs History (real jobs executed in session — never pre-populated with fake items)
   const [recentJobs, setRecentJobs] = useState<DesignJobItem[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
@@ -67,15 +62,11 @@ export function AiDesignView() {
         const payload = await response.json();
         if (!response.ok || !payload.success) {
           throw new Error(
-            payload.error?.message || "Không kiểm tra được cấu hình AI"
+            payload.error?.message || "Không kiểm tra được trạng thái dịch vụ thiết kế"
           );
         }
         if (!active) return;
         setAiConfigStatus(payload.data.configured ? "ready" : "missing");
-        setAiModels({
-          textModel: payload.data.textModel,
-          imageModel: payload.data.imageModel,
-        });
       })
       .catch(() => {
         if (active) setAiConfigStatus("unavailable");
@@ -109,7 +100,6 @@ export function AiDesignView() {
     formData.set("mockupType", mockupType);
     if (file) formData.set("image", file);
 
-    // The server gives Gemini up to 90s; cap the browser wait slightly above that so the UI never spins forever.
     let response: Response;
     try {
       response = await fetch("/api/ai/design", {
@@ -119,14 +109,14 @@ export function AiDesignView() {
       });
     } catch (error) {
       if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
-        throw new Error("AI phản hồi quá lâu (hơn 100 giây). Vui lòng thử lại với mô tả ngắn gọn hơn.");
+        throw new Error("Hệ thống phản hồi quá lâu (hơn 100 giây). Vui lòng thử lại với mô tả ngắn gọn hơn.");
       }
       throw error;
     }
     const payload = await response.json();
     if (!response.ok || !payload.success) {
       throw new Error(
-        payload.error?.message || "Không thể hoàn thành yêu cầu AI"
+        payload.error?.message || "Không thể hoàn thành yêu cầu thiết kế"
       );
     }
     return payload.data as {
@@ -155,7 +145,7 @@ export function AiDesignView() {
     setSelectedJobId(null);
     setIsGeneratingBanner(true);
 
-    const jobId = `JOB-${Date.now().toString().slice(-6)}`;
+    const jobId = `TK-${Date.now().toString().slice(-6)}`;
     const specLabel = `${widthMeters}m × ${heightMeters}m (${aspectRatio})`;
     const baseJob: DesignJobItem = {
       id: jobId,
@@ -171,14 +161,13 @@ export function AiDesignView() {
     try {
       const result = await requestDesign("banner", prompt);
       if (!result.imageDataUrl) {
-        throw new Error("Dịch vụ AI không trả về dữ liệu hình ảnh");
+        throw new Error("Dịch vụ thiết kế chưa trả về dữ liệu hình ảnh");
       }
       setBannerResult(result.imageDataUrl);
       upsertJob({
         ...baseJob,
         status: "completed",
         imageDataUrl: result.imageDataUrl,
-        modelUsed: result.model,
       });
     } catch (error) {
       const msg =
@@ -203,11 +192,11 @@ export function AiDesignView() {
     setSelectedJobId(null);
     setIsGeneratingVideo(true);
 
-    const jobId = `JOB-${Date.now().toString().slice(-6)}`;
+    const jobId = `TK-${Date.now().toString().slice(-6)}`;
     const baseJob: DesignJobItem = {
       id: jobId,
       mode: "video",
-      modeLabel: "Storyboard",
+      modeLabel: "Kịch bản phân cảnh",
       promptSummary: videoIdea.trim(),
       specLabel: `Khung hình ${videoRatio} · 15 giây`,
       status: "processing",
@@ -228,11 +217,10 @@ export function AiDesignView() {
         ...baseJob,
         status: "completed",
         storyboards: scenes,
-        modelUsed: result.model,
       });
     } catch (error) {
       const msg =
-        error instanceof Error ? error.message : "Không thể tạo Storyboard";
+        error instanceof Error ? error.message : "Không thể tạo kịch bản phân cảnh";
       setAiError(msg);
       upsertJob({
         ...baseJob,
@@ -253,11 +241,11 @@ export function AiDesignView() {
     setSelectedJobId(null);
     setIsCompositing(true);
 
-    const jobId = `JOB-${Date.now().toString().slice(-6)}`;
+    const jobId = `TK-${Date.now().toString().slice(-6)}`;
     const baseJob: DesignJobItem = {
       id: jobId,
       mode: "mockup",
-      modeLabel: "Mockup",
+      modeLabel: "Phối cảnh công trình",
       promptSummary: `Phối cảnh ${mockupType} trên ${mockupFile.name}`,
       specLabel: mockupType,
       status: "processing",
@@ -273,14 +261,13 @@ export function AiDesignView() {
         mockupFile
       );
       if (!result.imageDataUrl) {
-        throw new Error("Dịch vụ AI không trả về ảnh phối cảnh");
+        throw new Error("Dịch vụ thiết kế chưa trả về ảnh phối cảnh");
       }
       setMockupResult(result.imageDataUrl);
       upsertJob({
         ...baseJob,
         status: "completed",
         imageDataUrl: result.imageDataUrl,
-        modelUsed: result.model,
       });
     } catch (error) {
       const msg =
@@ -313,7 +300,6 @@ export function AiDesignView() {
   const isAiDisabled =
     aiConfigStatus === "checking" || aiConfigStatus === "missing";
 
-  // Active preview content determination
   const hasCurrentOutput =
     (activeTab === "banner" && Boolean(bannerResult)) ||
     (activeTab === "video" && videoStoryboards.length > 0) ||
@@ -323,31 +309,38 @@ export function AiDesignView() {
     <div className="space-y-6">
       {/* Header */}
       <PageHeader
-        title="AI Design"
-        description="Không gian sáng tạo hỗ trợ Designer phác thảo Banner màn hình LED, kịch bản Storyboard và phối cảnh công trình."
+        title="Hỗ trợ Thiết kế (AI Design)"
+        description="Không gian sáng tạo hỗ trợ bộ phận Thiết kế phác thảo Banner màn hình LED, kịch bản phân cảnh và phối cảnh công trình."
         actions={
           <>
             {aiConfigStatus === "ready" && (
-              <StatusBadge tone="success">
-                Gemini AI sẵn sàng ({aiModels?.imageModel || "Configured"})
-              </StatusBadge>
+              <StatusBadge tone="success">Dịch vụ thiết kế sẵn sàng</StatusBadge>
             )}
             {aiConfigStatus === "missing" && (
-              <StatusBadge tone="warning">AI chưa được cấu hình</StatusBadge>
+              <StatusBadge tone="warning">Chưa kích hoạt dịch vụ AI</StatusBadge>
             )}
             {aiConfigStatus === "unavailable" && (
-              <StatusBadge tone="error">Không kết nối được dịch vụ AI</StatusBadge>
+              <StatusBadge tone="error">Không kết nối được dịch vụ</StatusBadge>
             )}
             {aiConfigStatus === "checking" && (
-              <StatusBadge tone="info">Đang kiểm tra cấu hình...</StatusBadge>
+              <StatusBadge tone="info">Đang kiểm tra trạng thái...</StatusBadge>
             )}
           </>
         }
       />
 
-      {/* Split Creative Studio Workspace: Left Controls (5 cols) | Right Preview Canvas (7 cols) */}
+      {/* Survey Phase Notice (Section 2.4) */}
+      <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200/80 flex items-start gap-2.5 text-xs text-blue-950">
+        <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+        <div>
+          <strong className="font-semibold">Phân hệ Hỗ trợ Thiết kế (Giai đoạn khảo sát nghiệp vụ):</strong>{" "}
+          Tính năng đang được duy trì ở mức khung phác thảo cơ bản để chờ làm việc trực tiếp cùng bộ phận Thiết kế xác định quy trình chi tiết.
+        </div>
+      </div>
+
+      {/* Split Creative Studio Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-        {/* LEFT PANEL: Mode, Form Inputs, Prompt, Image Upload, Size/Ratio */}
+        {/* LEFT PANEL */}
         <div className="lg:col-span-5 crm-card p-5 flex flex-col justify-between gap-5">
           <div className="space-y-5">
             {/* Mode Switcher */}
@@ -388,7 +381,7 @@ export function AiDesignView() {
               <div className="space-y-4">
                 <div>
                   <label className="crm-label">
-                    Mô tả nội dung &amp; phong cách (Prompt)
+                    Mô tả nội dung &amp; phong cách thiết kế
                   </label>
                   <textarea
                     rows={4}
@@ -415,7 +408,7 @@ export function AiDesignView() {
                   </div>
 
                   <div>
-                    <label className="crm-label">Kích thước thực tế (mét)</label>
+                    <label className="crm-label">Kích thước tham khảo (mét)</label>
                     <div className="flex items-center gap-1.5">
                       <input
                         type="text"
@@ -446,13 +439,13 @@ export function AiDesignView() {
               <div className="space-y-4">
                 <div>
                   <label className="crm-label">
-                    Ý tưởng kịch bản Video LED 3D (Prompt)
+                    Ý tưởng kịch bản Video LED 3D
                   </label>
                   <textarea
                     rows={4}
                     value={videoIdea}
                     onChange={(e) => setVideoIdea(e.target.value)}
-                    placeholder="Mô tả sản phẩm, chuyển động hiệu ứng thị giác 3D Naked-eye, thông điệp kết..."
+                    placeholder="Mô tả sản phẩm, chuyển động hiệu ứng thị giác 3D, thông điệp kết..."
                     className="crm-textarea"
                   />
                 </div>
@@ -476,22 +469,22 @@ export function AiDesignView() {
             {activeTab === "mockup" && (
               <div className="space-y-4">
                 <div>
-                  <label className="crm-label">Dòng màn hình lắp đặt</label>
+                  <label className="crm-label">Dòng sản phẩm lắp đặt</label>
                   <select
                     value={mockupType}
                     onChange={(e) => setMockupType(e.target.value)}
                     className="crm-select"
                   >
-                    <option value="LED ngoài trời P4 chống nước">
-                      Màn hình LED P4 Outdoor mặt tiền
+                    <option value="Màn hình LED ngoài trời">
+                      Màn hình LED ngoài trời mặt tiền
                     </option>
-                    <option value="Màn hình LED cong P1.86">
-                      Màn hình LED cong P1.86 góc ngã tư
+                    <option value="Màn hình LED góc cong tòa nhà">
+                      Màn hình LED góc cong ngã tư
                     </option>
-                    <option value="LED trong suốt kính mặt tiền">
-                      Màn hình LED lưới trong suốt mặt kính
+                    <option value="Màn hình LED trong suốt">
+                      Màn hình LED trong suốt mặt kính
                     </option>
-                    <option value="Bảng điện tử ma trận 3 màu">
+                    <option value="Bảng điện tử ngân hàng / cơ quan">
                       Bảng điện tử thông tin cổng cơ quan / ngân hàng
                     </option>
                   </select>
@@ -607,7 +600,7 @@ export function AiDesignView() {
                 leftIcon={<Sparkles className="w-4 h-4" />}
                 onClick={handleGenerateVideo}
               >
-                Tạo kịch bản Storyboard
+                Tạo kịch bản phân cảnh
               </Button>
             )}
 
@@ -627,18 +620,18 @@ export function AiDesignView() {
 
             {aiConfigStatus === "missing" && (
               <p className="text-[11px] text-amber-700 text-center">
-                Cần cấu hình biến môi trường <code className="font-mono">GEMINI_API_KEY</code> trên máy chủ để kích hoạt tính năng tạo thiết kế.
+                Dịch vụ tạo hình ảnh tự động chưa được kích hoạt. Vui lòng liên hệ quản trị viên hệ thống.
               </p>
             )}
           </div>
         </div>
 
-        {/* RIGHT PANEL: Unified Studio Preview & Result Canvas */}
+        {/* RIGHT PANEL */}
         <div className="lg:col-span-7 crm-card p-5 flex flex-col justify-between min-h-[430px]">
           <div className="pb-3.5 border-b border-slate-100 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-[15px] font-semibold text-slate-900">
-                Khung xem trước &amp; Kết quả (Preview)
+                Khung xem trước &amp; Kết quả thiết kế
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 {activeTab === "banner" &&
@@ -650,7 +643,6 @@ export function AiDesignView() {
               </p>
             </div>
 
-            {/* Download Action when Output Exists */}
             {activeTab === "banner" && bannerResult && (
               <a
                 href={bannerResult}
@@ -670,7 +662,7 @@ export function AiDesignView() {
                     .map((scene, index) => `${index + 1}. ${scene}`)
                     .join("\n")
                 )}`}
-                download="storyboard-led-15s.txt"
+                download="kich-ban-led-15s.txt"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 text-xs font-semibold transition-colors"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -698,7 +690,7 @@ export function AiDesignView() {
                 <div className="h-56 rounded-xl bg-slate-100 animate-pulse border border-slate-200/70 flex flex-col items-center justify-center gap-2">
                   <Sparkles className="w-6 h-6 text-blue-500 animate-spin" />
                   <span className="text-xs font-medium text-slate-600">
-                    Đang kết xuất bản nháp thiết kế với Gemini AI...
+                    Đang kết xuất bản nháp thiết kế...
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-3 animate-pulse">
@@ -770,11 +762,11 @@ export function AiDesignView() {
                 aiConfigStatus === "unavailable") ? (
               <EmptyState
                 icon={KeyRound}
-                title="AI chưa được cấu hình"
+                title="Dịch vụ hỗ trợ thiết kế chưa kích hoạt"
                 description={
                   aiConfigStatus === "missing"
-                    ? "Máy chủ chưa được thiết lập GEMINI_API_KEY trong tệp môi trường (.env). Vui lòng cấu hình khóa API và khởi động lại dịch vụ để tạo hình ảnh & kịch bản thực tế."
-                    : "Hiện không thể kiểm tra trạng thái dịch vụ Gemini AI từ máy chủ. Vui lòng kiểm tra kết nối backend và thử lại."
+                    ? "Tính năng tạo hình ảnh và kịch bản tự động hiện chưa được kích hoạt trên hệ thống. Vui lòng liên hệ quản trị viên khi cần mở kết nối."
+                    : "Hiện không thể kết nối dịch vụ hỗ trợ thiết kế. Vui lòng thử lại sau."
                 }
               />
             ) : (
@@ -787,12 +779,8 @@ export function AiDesignView() {
           </div>
 
           <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-            <span>
-              {aiModels
-                ? `Models: ${aiModels.textModel} · ${aiModels.imageModel}`
-                : "Dịch vụ xử lý: Google Gemini API"}
-            </span>
-            <span>Không lưu trữ ảnh mẫu giả lập</span>
+            <span>Phân hệ Hỗ trợ Thiết kế Toàn Trung</span>
+            <span>Chỉ hiển thị kết quả tạo thật trong phiên</span>
           </div>
         </div>
       </div>

@@ -9,5 +9,4 @@ export {
   DEPARTMENT_FILTERS,
   DEPARTMENT_META,
   extractReportSummary,
-  parseVndFromLead,
 } from "./components/FormattedReportBody";

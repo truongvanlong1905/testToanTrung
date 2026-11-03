@@ -1,27 +1,35 @@
 import type { UserSession } from "@/src/core/auth/auth";
 import { prisma } from "@/src/core/db/prisma";
 import { AppError } from "@/src/core/http";
-import { BulkImportSchema } from "./contracts";
-import { computeLeadScore, extractMaxCodeSuffix } from "./lead-scoring.service";
+import { BulkImportSchema, normalizeVietnamPhone } from "./contracts";
+import { extractMaxCodeSuffix } from "./lead-scoring.service";
 import { assertCanAssignLead, assertCanImportLeads } from "./policy";
 import { logLeadAudit } from "./repository";
-
-function cleanDigits(phone: string): string {
-  return phone.replace(/\D/g, "");
-}
 
 export async function assignLeadSalesPerson(
   user: UserSession,
   leadId: string,
-  body: { newSalesPersonId?: string; reason?: string }
+  body: {
+    newSalesPersonId?: string;
+    reason?: string;
+    expectedFromSalesId?: string | null;
+  }
 ) {
-  const { newSalesPersonId, reason } = body || {};
+  const { newSalesPersonId, reason, expectedFromSalesId } = body || {};
 
-  if (!newSalesPersonId) {
+  if (!newSalesPersonId || !newSalesPersonId.trim()) {
     throw new AppError(
       400,
-      "Vui lòng chọn nhân viên Sales mới",
+      "Vui lòng chọn nhân viên kinh doanh nhận bàn giao",
       "VALIDATION_ERROR"
+    );
+  }
+
+  if (!reason || !reason.trim()) {
+    throw new AppError(
+      400,
+      "Bắt buộc nhập lý do chuyển kinh doanh khác",
+      "REASON_REQUIRED"
     );
   }
 
@@ -31,43 +39,104 @@ export async function assignLeadSalesPerson(
   ]);
 
   if (!existingLead) {
-    throw new AppError(404, "Không tìm thấy khách hàng", "NOT_FOUND");
+    throw new AppError(404, "Không tìm thấy hồ sơ Lead", "NOT_FOUND");
   }
 
   assertCanAssignLead(
     user,
     existingLead,
-    "Chỉ người đang phụ trách hoặc cấp Trưởng phòng / Trưởng ban / Giám đốc / Admin mới được bàn giao Lead"
+    "Chỉ người đang phụ trách hoặc cấp quản lý (Trưởng phòng / Marketing / Giám đốc / Admin) mới được chuyển giao Lead"
   );
+
+  if (
+    expectedFromSalesId !== undefined &&
+    existingLead.salesPersonId !== expectedFromSalesId
+  ) {
+    throw new AppError(
+      409,
+      "Hồ sơ Lead này vừa được chuyển giao bởi người dùng khác. Vui lòng tải lại dữ liệu.",
+      "CONCURRENT_MODIFICATION"
+    );
+  }
 
   if (!targetSales || !targetSales.isActive) {
     throw new AppError(
       404,
-      "Nhân viên Sales không tồn tại hoặc đã vô hiệu hóa",
+      "Nhân viên nhận bàn giao không tồn tại hoặc đã bị vô hiệu hóa",
       "SALES_NOT_FOUND"
     );
   }
 
+  const isTargetSalesRole =
+    targetSales.role === "SALES" ||
+    targetSales.department === "SALES" ||
+    targetSales.role === "ADMIN" ||
+    targetSales.role === "DIRECTOR";
+
+  if (!isTargetSalesRole) {
+    throw new AppError(
+      400,
+      "Nhân sự nhận bàn giao phải thuộc bộ phận Kinh doanh (SALES)",
+      "INVALID_TARGET_SALES"
+    );
+  }
+
   const fromSalesId = existingLead.salesPersonId;
+  const cleanReason = reason.trim();
 
-  const updatedLead = await prisma.lead.update({
-    where: { id: leadId },
-    data: { salesPersonId: newSalesPersonId },
-    include: {
-      salesPerson: {
-        select: { id: true, name: true, initials: true, email: true },
+  const { updatedLead, assignment } = await prisma.$transaction(async (tx) => {
+    const updateRes = await tx.lead.updateMany({
+      where: {
+        id: leadId,
+        salesPersonId: fromSalesId,
       },
-    },
-  });
+      data: {
+        salesPersonId: newSalesPersonId,
+        updatedAt: new Date(),
+      },
+    });
 
-  const assignment = await prisma.leadAssignment.create({
-    data: {
-      leadId,
-      fromSalesId,
-      toSalesId: newSalesPersonId,
-      reason: reason || "Bàn giao phụ trách khách hàng",
-      assignedById: user.userId,
-    },
+    if (updateRes.count === 0) {
+      throw new AppError(
+        409,
+        "Hồ sơ Lead vừa được chuyển giao bởi người dùng khác. Vui lòng tải lại dữ liệu.",
+        "CONCURRENT_MODIFICATION"
+      );
+    }
+
+    const createdAssignment = await tx.leadAssignment.create({
+      data: {
+        leadId,
+        fromSalesId,
+        toSalesId: newSalesPersonId,
+        reason: cleanReason,
+        assignedById: user.userId,
+      },
+    });
+
+    await tx.leadActivity.create({
+      data: {
+        leadId,
+        type: "NOTE",
+        summary: `Chuyển phụ trách kinh doanh sang ${targetSales.name}`,
+        outcome: `Lý do: ${cleanReason}`,
+        createdById: user.userId,
+      },
+    });
+
+    const refreshedLead = await tx.lead.findUnique({
+      where: { id: leadId },
+      include: {
+        salesPerson: {
+          select: { id: true, name: true, initials: true, email: true },
+        },
+      },
+    });
+
+    return {
+      updatedLead: refreshedLead!,
+      assignment: createdAssignment,
+    };
   });
 
   await logLeadAudit({
@@ -77,12 +146,12 @@ export async function assignLeadSalesPerson(
     details: JSON.stringify({
       fromSalesId,
       toSalesId: newSalesPersonId,
-      reason,
+      reason: cleanReason,
     }),
   });
 
   return {
-    message: `Đã bàn giao Lead cho nhân viên ${targetSales.name} thành công`,
+    message: `Đã chuyển giao Lead cho nhân viên ${targetSales.name} thành công`,
     lead: updatedLead,
     assignment,
   };
@@ -106,10 +175,12 @@ export async function bulkImportLeadsWithRoundRobin(
   const { items, autoAssignRoundRobin } = parsed.data;
 
   const existingLeads = await prisma.lead.findMany({
-    select: { phone: true, code: true },
+    select: { phone: true, normalizedPhone: true, code: true },
   });
   const existingPhoneSet = new Set(
-    existingLeads.map((l) => cleanDigits(l.phone)).filter((d) => d.length >= 8)
+    existingLeads
+      .map((l) => l.normalizedPhone || normalizeVietnamPhone(l.phone))
+      .filter((d) => d.length >= 8)
   );
 
   const activeSales = await prisma.user.findMany({
@@ -121,7 +192,9 @@ export async function bulkImportLeadsWithRoundRobin(
     orderBy: { createdAt: "asc" },
   });
 
-  const defaultCategory = await prisma.productCategory.findFirst();
+  const defaultCategory = await prisma.productCategory.findFirst({
+    orderBy: { sortOrder: "asc" },
+  });
   const categoryId = defaultCategory?.id || "cat_led_indoor";
 
   const now = new Date();
@@ -135,15 +208,13 @@ export async function bulkImportLeadsWithRoundRobin(
   let skippedDuplicates = 0;
   const assignmentSummary: Record<string, number> = {};
 
-  const slaDeadline = new Date(now.getTime() + 2 * 3_600_000);
-
   for (const item of items) {
-    const digits = cleanDigits(item.phone);
-    if (digits.length < 8 || existingPhoneSet.has(digits)) {
+    const normalizedPhone = normalizeVietnamPhone(item.phone);
+    if (normalizedPhone.length < 8 || existingPhoneSet.has(normalizedPhone)) {
       skippedDuplicates += 1;
       continue;
     }
-    existingPhoneSet.add(digits);
+    existingPhoneSet.add(normalizedPhone);
 
     runningCount += 1;
     const code = `TT-LED-${ym}-${String(runningCount).padStart(4, "0")}`;
@@ -158,34 +229,23 @@ export async function bulkImportLeadsWithRoundRobin(
       rrIndex += 1;
     }
 
-    const scored = computeLeadScore({
-      status: "Vừa nhận thông tin",
-      estimatedValue: item.estimatedValue,
-      installationAddress: item.location,
-      email: item.email,
-      source: item.source,
-    });
-
     const created = await prisma.lead.create({
       data: {
         code,
-        customerName: item.customerName,
-        companyName: item.companyName || "Khách hàng doanh nghiệp",
-        phone: item.phone,
+        customerName: item.customerName.trim(),
+        companyName: item.companyName?.trim() || "",
+        phone: item.phone.trim(),
+        normalizedPhone,
         email: item.email || null,
-        location: item.location || "TP. Hồ Chí Minh",
-        product: item.product,
+        location: item.location?.trim() || "",
+        product: item.product?.trim() || "Chưa chọn sản phẩm",
         categoryId,
         source: item.source || "Website",
+        contactChannel: item.contactChannel || item.source || "Điền form",
         status: "Vừa nhận thông tin",
-        estimatedValue: item.estimatedValue || "Đang khảo sát",
         notes: item.notes || "",
         salesPersonId: assignedSalesId,
         createdById: user.userId,
-        priorityScore: scored.score,
-        priorityTier: scored.tier,
-        nextFollowUpAt: slaDeadline,
-        nextActionNote: "Gọi tiếp nhận & xác nhận kích thước mặt bằng LED (SLA 2h)",
       },
     });
 
@@ -194,7 +254,7 @@ export async function bulkImportLeadsWithRoundRobin(
         leadId: created.id,
         fromStatus: null,
         toStatus: "Vừa nhận thông tin",
-        reason: `Import hàng loạt từ nguồn ${item.source || "Website"} (Auto Round-Robin)`,
+        reason: `Import hàng loạt từ nguồn ${item.source || "Website"}`,
         changedById: user.userId,
       },
     });
@@ -204,7 +264,7 @@ export async function bulkImportLeadsWithRoundRobin(
         data: {
           leadId: created.id,
           toSalesId: assignedSalesId,
-          reason: `Phân công tự động Round-Robin khi import nguồn ${item.source || "Website"}`,
+          reason: `Phân công tự động khi import nguồn ${item.source || "Website"}`,
           assignedById: user.userId,
         },
       });

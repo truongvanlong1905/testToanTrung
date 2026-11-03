@@ -3,7 +3,11 @@ import { AppError } from "@/src/core/http";
 import { getTrackingDashboardSnapshot } from "@/src/modules/02-tracking/public";
 import { getAdsDashboardSnapshot } from "@/src/modules/03-ads-keywords/public";
 import { CreateReportSchema } from "./contracts";
-import { buildReportVisibilityFilter, isBoardOrAdminUser } from "./policy";
+import {
+  assertCanAccessReportRecord,
+  buildReportVisibilityFilter,
+  isBoardOrAdminUser,
+} from "./policy";
 import {
   countDepartmentReports,
   createDepartmentReportRecord,
@@ -31,6 +35,15 @@ export async function listReports(user: UserSession) {
     currentUserRole: user.role,
     currentUserId: user.userId,
   };
+}
+
+export async function getReportById(user: UserSession, reportId: string) {
+  const report = await findReportById(reportId);
+  if (!report) {
+    throw new AppError(404, "Không tìm thấy báo cáo / thông báo", "NOT_FOUND");
+  }
+  assertCanAccessReportRecord(user, report);
+  return { report };
 }
 
 export async function createReport(user: UserSession, body: unknown) {
@@ -85,6 +98,8 @@ export async function markReportRead(user: UserSession, reportId: string) {
       "NOT_FOUND"
     );
   }
+
+  assertCanAccessReportRecord(user, existingReport);
 
   await upsertReportReadRecord(reportId, user.userId);
   return { reportId, read: true };

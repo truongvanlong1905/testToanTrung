@@ -15,7 +15,8 @@ export const DEPARTMENT_META: Record<
   },
   ADS: { label: "Bộ phận Quảng cáo (Ads)", shortLabel: "Ads", tone: "warning" },
   DESIGN: { label: "Phòng Thiết kế (Design)", shortLabel: "Design", tone: "neutral" },
-  ADMIN: { label: "Ban Giám Đốc", shortLabel: "Ban Giám Đốc", tone: "error" },
+  DIRECTOR: { label: "Ban Giám Đốc", shortLabel: "Ban Giám Đốc", tone: "error" },
+  ADMIN: { label: "Ban Giám Đốc / Quản trị", shortLabel: "Ban Giám Đốc", tone: "error" },
 };
 
 export const DEPARTMENT_FILTERS = [
@@ -24,7 +25,8 @@ export const DEPARTMENT_FILTERS = [
   { id: "MARKETING", label: "Marketing" },
   { id: "ADS", label: "Ads" },
   { id: "DESIGN", label: "Design" },
-  { id: "ADMIN", label: "Ban Giám Đốc" },
+  { id: "DIRECTOR", label: "Ban Giám Đốc" },
+  { id: "ADMIN", label: "Quản trị" },
 ] as const;
 
 export const CALLOUT_STYLES = {
@@ -32,12 +34,6 @@ export const CALLOUT_STYLES = {
   warning: "bg-amber-50/80 border-amber-200 text-amber-950",
   success: "bg-emerald-50/80 border-emerald-200 text-emerald-950",
 } as const;
-
-export function parseVndFromLead(raw?: string): number {
-  if (!raw) return 0;
-  const digits = raw.replace(/[^\d]/g, "");
-  return digits ? Number(digits) || 0 : 0;
-}
 
 export function extractReportSummary(content: string): string {
   return (content || "").replace(/[#*`_>|]/g, "").replace(/\s+/g, " ").trim();
