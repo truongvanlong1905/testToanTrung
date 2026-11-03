@@ -6,15 +6,13 @@ import {
   SlidersHorizontal,
   FileSpreadsheet,
   Upload,
-  Sparkles,
+  Plus,
 } from "lucide-react";
 import { PageHeader } from "@/src/core/ui/page-header";
 import { Button } from "@/src/core/ui/button";
 import { ErrorState, PageSkeleton } from "@/src/core/ui/feedback-states";
-import { StatsCards } from "./StatsCards";
 import { LeadFilters } from "./LeadFilters";
 import { LeadTable } from "./LeadTable";
-import { AiQuickLeadBar, type AiLeadDraft } from "./AiQuickLeadBar";
 import type { Lead, LeadStatsSummary, LeadStatus } from "../types";
 
 export interface LeadsWorkspaceViewProps {
@@ -46,26 +44,23 @@ export interface LeadsWorkspaceViewProps {
   onResetFilters: () => void;
   onFilterStatus: (status: string) => void;
   onSelectLead: (lead: Lead) => void;
+  onEditLead?: (lead: Lead) => void;
   onOpenNewLead: () => void;
   onOpenImportLeads: () => void;
   onExportLeads: () => void;
   isExportingLeads: boolean;
-  onQuickLeadCreated: (lead: Lead, msg: string) => void;
-  onOpenPrefilledModal: (draft: AiLeadDraft, warning?: string) => void;
   onQuickUpdateStatus: (lead: Lead, newStatus: LeadStatus) => void;
   onRetryFetch: () => void;
 }
 
-export function LeadsWorkspaceView({
+export const LeadsWorkspaceView = React.memo(function LeadsWorkspaceView({
   displayedLeads,
-  leadStats,
   isLoading,
   hasLoadedLeads,
   leadLoadError,
   showFilters,
   onToggleFilters,
   activeFilterCount,
-  nonStatusFilterCount,
   searchQuery,
   onSearchChange,
   statusFilter,
@@ -83,14 +78,12 @@ export function LeadsWorkspaceView({
   customDateTo,
   onCustomDateToChange,
   onResetFilters,
-  onFilterStatus,
   onSelectLead,
+  onEditLead,
   onOpenNewLead,
   onOpenImportLeads,
   onExportLeads,
   isExportingLeads,
-  onQuickLeadCreated,
-  onOpenPrefilledModal,
   onQuickUpdateStatus,
   onRetryFetch,
 }: LeadsWorkspaceViewProps) {
@@ -98,7 +91,7 @@ export function LeadsWorkspaceView({
     <div className="space-y-5">
       <PageHeader
         title="Quản lý Lead"
-        description="Theo dõi cơ hội dự án Màn hình LED & Bảng điện tử từ tiếp nhận đến chốt hợp đồng."
+        description="Theo dõi thông tin khách hàng tiềm năng Màn hình LED & Bảng Điện Tử, phân công kinh doanh và tiến độ chăm sóc."
         actions={
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
             <Button
@@ -108,7 +101,7 @@ export function LeadsWorkspaceView({
               leftIcon={<SlidersHorizontal className="w-3.5 h-3.5" />}
               className="w-full sm:w-auto justify-center"
             >
-              Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+              Bộ lọc{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
             </Button>
 
             <Button
@@ -130,27 +123,20 @@ export function LeadsWorkspaceView({
               className="w-full sm:w-auto justify-center"
               onClick={onExportLeads}
             >
-              Export
+              Xuất Excel
             </Button>
 
             <Button
               variant="primary"
               size="md"
               onClick={onOpenNewLead}
-              leftIcon={<Sparkles className="w-4 h-4" />}
+              leftIcon={<Plus className="w-4 h-4" />}
               className="w-full sm:w-auto justify-center"
             >
-              Thêm Lead / AI
+              Thêm Lead mới
             </Button>
           </div>
         }
-      />
-
-      {/* AI 1-Click Fast Lead Intake Bar */}
-      <AiQuickLeadBar
-        onLeadCreated={onQuickLeadCreated}
-        onOpenPrefilledModal={onOpenPrefilledModal}
-        onSelectLead={onSelectLead}
       />
 
       {leadLoadError && (
@@ -173,13 +159,6 @@ export function LeadsWorkspaceView({
 
       {hasLoadedLeads ? (
         <>
-          <StatsCards
-            leads={displayedLeads}
-            stats={nonStatusFilterCount === 0 ? leadStats : undefined}
-            activeStatus={statusFilter}
-            onFilterStatus={onFilterStatus}
-          />
-
           {showFilters && (
             <LeadFilters
               search={searchQuery}
@@ -213,6 +192,7 @@ export function LeadsWorkspaceView({
             <LeadTable
               leads={displayedLeads}
               onSelectLead={onSelectLead}
+              onEditLead={onEditLead}
               onCreateLead={onOpenNewLead}
               onQuickUpdateStatus={onQuickUpdateStatus}
               hasActiveFilters={activeFilterCount > 0}
@@ -225,4 +205,4 @@ export function LeadsWorkspaceView({
       ) : null}
     </div>
   );
-}
+});

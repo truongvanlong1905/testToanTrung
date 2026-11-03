@@ -46,9 +46,8 @@ export async function POST(
 
   try {
     const { id } = await params;
-    const body = await req.json();
-    const result = await createLeadQuote(user, id, body);
-    return apiSuccess({ quote: result.quote }, 201, { message: result.message });
+    const body = await req.json().catch(() => ({}));
+    return await createLeadQuote(user, id, body);
   } catch (error) {
     return handleRouteError(
       error,
@@ -72,9 +71,8 @@ export async function PATCH(
 
   try {
     const { id } = await params;
-    const body = await req.json();
-    const result = await approveOrRejectLeadQuote(user, id, body);
-    return apiSuccess({ quote: result.quote }, 200, { message: result.message });
+    const body = await req.json().catch(() => ({}));
+    return await approveOrRejectLeadQuote(user, id, body);
   } catch (error) {
     return handleRouteError(
       error,

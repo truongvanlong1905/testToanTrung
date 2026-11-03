@@ -9,7 +9,7 @@ import { parseEstimatedVnd } from "./lead-value";
    Generates 100% genuine Microsoft Excel (.xlsx) multi-sheet files with:
    - Corporate Header Banners, Colored Worksheet Tabs, Freeze Panes, AutoFilter
    - Custom Column Widths, Generous Row Heights, Crisp Cell Borders & Zebra Rows
-   - Color-coded Status Badges, Live Excel Formulas (=SUM), VNĐ Currency Formats
+   - Color-coded Status Badges, Live Excel Formulas (=SUM), Text-Formatted Phones
    ============================================================================ */
 
 type AlignH = "left" | "center" | "right";
@@ -41,7 +41,7 @@ const STYLE_DEFS: StyleDef[] = [
   { name: "thCenter", fontId: 4, fillId: 3, borderId: 2, numFmtId: 0, alignH: "center", wrap: true },
   { name: "thLeft", fontId: 4, fillId: 3, borderId: 2, numFmtId: 0, alignH: "left", wrap: true },
   { name: "thRight", fontId: 4, fillId: 3, borderId: 2, numFmtId: 0, alignH: "right", wrap: true },
-  //Even Rows (White Fill = 5)
+  // Even Rows (White Fill = 5)
   { name: "cellCenter", fontId: 0, fillId: 5, borderId: 1, numFmtId: 0, alignH: "center" },
   { name: "cellCode", fontId: 6, fillId: 5, borderId: 1, numFmtId: 49, alignH: "center" },
   { name: "cellBold", fontId: 5, fillId: 5, borderId: 1, numFmtId: 0, alignH: "left", wrap: true },
@@ -356,7 +356,6 @@ async function buildXlsxZipBlob(entries: Array<{ path: string; xml: string }>): 
     const crc = crc32(rawBytes);
     const { data: compBytes, method } = await deflateRawBytes(rawBytes);
 
-    // Local File Header (30 + filename)
     const lh = new Uint8Array(30 + nameBytes.length);
     const lhv = new DataView(lh.buffer);
     lhv.setUint32(0, 0x04034b50, true);
@@ -374,7 +373,6 @@ async function buildXlsxZipBlob(entries: Array<{ path: string; xml: string }>): 
 
     localParts.push(lh, compBytes);
 
-    // Central Directory Header (46 + filename)
     const ch = new Uint8Array(46 + nameBytes.length);
     const chv = new DataView(ch.buffer);
     chv.setUint32(0, 0x02014b50, true);
@@ -483,8 +481,8 @@ async function downloadWorkbook(filename: string, sheets: SheetSpec[]): Promise<
 
   const appXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
-  <Application>Toàn Trung Marketing &amp; Sales OS</Application>
-  <Company>Công ty Cổ phần Điện tử Viễn thông Toàn Trung</Company>
+  <Application>Toàn Trung CRM</Application>
+  <Company>Công ty TNHH Điện tử Viễn thông Toàn Trung</Company>
 </Properties>`;
 
   const entries: Array<{ path: string; xml: string }> = [
@@ -553,13 +551,13 @@ function addCorporateHeader(
     1,
     1,
     totalCols,
-    `  CÔNG TY CỔ PHẦN ĐIỆN TỬ VIỄN THÔNG TOÀN TRUNG  —  ${reportTitle.toUpperCase()}`,
+    `  CÔNG TY TNHH ĐIỆN TỬ VIỄN THÔNG TOÀN TRUNG  —  ${reportTitle.toUpperCase()}`,
     "bannerTitle",
     36
   );
   addMergedBanner(sheet, 2, 1, totalCols, `  ${subtitle}`, "bannerSubtitle", 23);
   addMergedBanner(sheet, 3, 1, totalCols, `  ${metaInfo}`, "metaBar", 24);
-  return 5; // Next available row after 1 blank spacer row
+  return 5;
 }
 
 function addEmptyTableRow(sheet: SheetSpec, row: number, totalCols: number, message: string) {
@@ -596,30 +594,8 @@ function statusBadgeStyle(status: LeadStatus | string): number {
   }
 }
 
-function detectDuplicateSet(leads: Lead[]): Set<string> {
-  const phoneCounts = new Map<string, number>();
-  const companyCounts = new Map<string, number>();
-  leads.forEach((l) => {
-    const p = (l.phone || "").replace(/\D/g, "");
-    if (p.length >= 8) phoneCounts.set(p, (phoneCounts.get(p) || 0) + 1);
-    const c = (l.companyName || "").trim().toLowerCase();
-    if (c && !c.includes("cá nhân") && c !== "khách lẻ") {
-      companyCounts.set(c, (companyCounts.get(c) || 0) + 1);
-    }
-  });
-  const dups = new Set<string>();
-  leads.forEach((l) => {
-    const p = (l.phone || "").replace(/\D/g, "");
-    const c = (l.companyName || "").trim().toLowerCase();
-    if ((p && (phoneCounts.get(p) || 0) > 1) || (c && (companyCounts.get(c) || 0) > 1)) {
-      dups.add(l.id);
-    }
-  });
-  return dups;
-}
-
 /* ============================================================================
-   1. LEADS & OVERVIEW WORKBOOK (3 SHEETS)
+   1. LEADS & OVERVIEW WORKBOOK (4 SHEETS — CHUẨN BRIEF, KHÔNG CỘT TIỀN/DOANH THU)
    ============================================================================ */
 
 function buildLeadOverviewSheet(
@@ -630,7 +606,7 @@ function buildLeadOverviewSheet(
   const sheet: SheetSpec = {
     name: "1. Tổng Quan Kinh Doanh",
     tabColorRgb: "FF2563EB",
-    colWidths: [28, 18, 18, 24, 24],
+    colWidths: [28, 18, 18, 22, 28],
     merges: [],
     rows: [],
   };
@@ -645,13 +621,14 @@ function buildLeadOverviewSheet(
 
   const total = stats?.total ?? leads.length;
   const newCount = leads.filter((l) => l.status === "Vừa nhận thông tin").length;
-  const draftingCount = leads.filter((l) => l.status === "Đang soạn báo giá").length;
   const sentQuoteCount = leads.filter((l) => l.status === "Đã gửi báo giá").length;
+  const unrespondedCount = leads.filter(
+    (l) => l.status === "Đã gửi báo giá" && !l.customerResponded
+  ).length;
   const wonCount = leads.filter((l) => l.status === "Chốt thành công").length;
-  const totalEstimatedVnd = leads.reduce((sum, l) => sum + parseEstimatedVnd(l.estimatedValue), 0);
   const winRate = total > 0 ? wonCount / total : 0;
 
-  // Section 1: KPI Cards
+  // Section 1: KPI Cards (No money/revenue columns per AC-15, AC-24)
   addMergedBanner(sheet, r++, 1, 5, "I. CHỈ SỐ ĐO LƯỜNG HIỆU QUẢ TỔNG HỢP (KPIs)", "sectionHeader", 26);
 
   sheet.rows.push({
@@ -660,9 +637,9 @@ function buildLeadOverviewSheet(
     cells: [
       { col: 1, value: "Tổng số Lead quản lý", style: sIdx("kpiLabel") },
       { col: 2, value: "Vừa nhận thông tin", style: sIdx("kpiLabel") },
-      { col: 3, value: "Đang & Đã báo giá", style: sIdx("kpiLabel") },
-      { col: 4, value: "Chốt hợp đồng (Tỷ lệ)", style: sIdx("kpiLabel") },
-      { col: 5, value: "Tổng dự toán Pipeline", style: sIdx("kpiLabel") },
+      { col: 3, value: "Đã gửi báo giá", style: sIdx("kpiLabel") },
+      { col: 4, value: "Chưa phản hồi báo giá", style: sIdx("kpiLabel") },
+      { col: 5, value: "Chốt thành công (Tỷ lệ)", style: sIdx("kpiLabel") },
     ],
   });
 
@@ -672,16 +649,16 @@ function buildLeadOverviewSheet(
     cells: [
       { col: 1, value: leads.length, type: "num", style: sIdx("kpiInt") },
       { col: 2, value: newCount, type: "num", style: sIdx("kpiInt") },
-      { col: 3, value: draftingCount + sentQuoteCount, type: "num", style: sIdx("kpiInt") },
-      { col: 4, value: winRate, type: "num", style: sIdx("kpiPercent") },
-      { col: 5, value: totalEstimatedVnd, type: "num", style: sIdx("kpiCurrency") },
+      { col: 3, value: sentQuoteCount, type: "num", style: sIdx("kpiInt") },
+      { col: 4, value: unrespondedCount, type: "num", style: sIdx("kpiInt") },
+      { col: 5, value: winRate, type: "num", style: sIdx("kpiPercent") },
     ],
   });
 
   r += 1;
 
   // Section 2: 5-Stage Pipeline Funnel
-  addMergedBanner(sheet, r++, 1, 5, "II. PHỄU CHUYỂN ĐỔI TIẾN ĐỘ DỰ ÁN (5 BƯỚC CHUẨN NGHIỆP VỤ BA)", "sectionHeader", 26);
+  addMergedBanner(sheet, r++, 1, 5, "II. PHỄU CHUYỂN ĐỔI TIẾN ĐỘ BÁN HÀNG (5 TRẠNG THÁI CHUẨN)", "sectionHeader", 26);
   sheet.rows.push({
     row: r++,
     height: 27,
@@ -689,23 +666,26 @@ function buildLeadOverviewSheet(
       { col: 1, value: "Giai đoạn tiến độ", style: sIdx("thLeft") },
       { col: 2, value: "Số lượng Lead", style: sIdx("thRight") },
       { col: 3, value: "Tỷ trọng (%)", style: sIdx("thRight") },
-      { col: 4, value: "Giá trị dự toán (VNĐ)", style: sIdx("thRight") },
+      { col: 4, value: "Số khách chưa phản hồi", style: sIdx("thRight") },
       { col: 5, value: "Đánh giá trạng thái", style: sIdx("thCenter") },
     ],
   });
 
   const stages: Array<{ status: LeadStatus; note: string }> = [
     { status: "Vừa nhận thông tin", note: "Cần liên hệ tư vấn & khảo sát ngay" },
-    { status: "Đang soạn báo giá", note: "Đang bóc tách kỹ thuật & lập dự toán" },
-    { status: "Đã gửi báo giá", note: "Ưu tiên Sales bám sát chốt hợp đồng" },
-    { status: "Chốt thành công", note: "Đã ký kết hợp đồng triển khai thi công" },
+    { status: "Đang soạn báo giá", note: "Đang bóc tách kỹ thuật & chuẩn bị báo giá" },
+    { status: "Đã gửi báo giá", note: "Ưu tiên Sales bám sát ghi nhận phản hồi" },
+    { status: "Chốt thành công", note: "Khách hàng đồng ý triển khai" },
     { status: "Thất bại", note: "Đã lưu lý do để phân tích tối ưu" },
   ];
 
   const funnelStartRow = r;
   stages.forEach((st, idx) => {
     const stageLeads = leads.filter((l) => l.status === st.status);
-    const stageVnd = stageLeads.reduce((s, l) => s + parseEstimatedVnd(l.estimatedValue), 0);
+    const stageUnresponded =
+      st.status === "Đã gửi báo giá"
+        ? stageLeads.filter((l) => !l.customerResponded).length
+        : 0;
     const pct = leads.length > 0 ? stageLeads.length / leads.length : 0;
     const z = idx % 2 === 1;
     sheet.rows.push({
@@ -715,7 +695,7 @@ function buildLeadOverviewSheet(
         { col: 1, value: st.status, style: statusBadgeStyle(st.status) },
         { col: 2, value: stageLeads.length, type: "num", style: sIdx("cellInt", z) },
         { col: 3, value: pct, type: "num", style: sIdx("cellPercent", z) },
-        { col: 4, value: stageVnd, type: "num", style: sIdx("cellCurrency", z) },
+        { col: 4, value: stageUnresponded, type: "num", style: sIdx("cellInt", z) },
         { col: 5, value: st.note, style: sIdx("cellNote", z) },
       ],
     });
@@ -729,36 +709,36 @@ function buildLeadOverviewSheet(
       { col: 1, value: "TỔNG CỘNG TOÀN PHỄU", style: sIdx("totalLabel") },
       { col: 2, formula: `SUM(B${funnelStartRow}:B${funnelEndRow})`, value: leads.length, style: sIdx("totalInt") },
       { col: 3, value: 1, type: "num", style: sIdx("totalPercent") },
-      { col: 4, formula: `SUM(D${funnelStartRow}:D${funnelEndRow})`, value: totalEstimatedVnd, style: sIdx("totalCurrency") },
+      { col: 4, value: unrespondedCount, type: "num", style: sIdx("totalInt") },
       { col: 5, value: "100% Dữ liệu đối soát", style: sIdx("totalCenter") },
     ],
   });
 
   r += 1;
 
-  // Section 3: 3 Core Product Groups + Sales Leaderboard
-  addMergedBanner(sheet, r++, 1, 5, "III. CƠ CẤU THEO 3 NHÓM SẢN PHẨM CHỦ LỰC (BA MODULE 1 & 4)", "sectionHeader", 26);
+  // Section 3: Product Groups
+  addMergedBanner(sheet, r++, 1, 5, "III. CƠ CẤU THEO NHÓM SẢN PHẨM & NHU CẦU KHÁCH HÀNG", "sectionHeader", 26);
   sheet.rows.push({
     row: r++,
     height: 27,
     cells: [
       { col: 1, value: "Nhóm sản phẩm chủ lực", style: sIdx("thLeft") },
-      { col: 2, value: "Số lượng hỏi mua", style: sIdx("thRight") },
+      { col: 2, value: "Số lượng Lead", style: sIdx("thRight") },
       { col: 3, value: "Tỷ trọng nhu cầu", style: sIdx("thRight") },
-      { col: 4, value: "Tổng dự toán nhóm SP", style: sIdx("thRight") },
+      { col: 4, value: "Số lượng chốt", style: sIdx("thRight") },
       { col: 5, value: "Dòng sản phẩm tiêu biểu", style: sIdx("thLeft") },
     ],
   });
 
   const groupDefs = [
-    { name: "Màn hình LED", desc: "LED Hội trường Indoor P1.5–P3, LED Outdoor P4–P10" },
-    { name: "Bảng điện tử", desc: "Bảng ma trận thông tin, tỷ giá ngân hàng, cổng trường" },
-    { name: "Sản phẩm khác", desc: "Bộ xử lý Novastar, khung kết cấu, âm thanh hội trường" },
+    { name: "Màn hình LED", desc: "Màn hình LED trong nhà, ngoài trời, sân khấu, hội trường, phòng họp" },
+    { name: "Bảng điện tử", desc: "Bảng điện tử ngân hàng, bệnh viện, nhà máy, trường học, giao thông" },
+    { name: "Sản phẩm khác", desc: "Nhu cầu tùy chỉnh theo yêu cầu riêng của khách hàng" },
   ];
 
   groupDefs.forEach((g, idx) => {
     const grpLeads = leads.filter((l) => classifyProductGroupLabel(l) === g.name);
-    const grpVnd = grpLeads.reduce((s, l) => s + parseEstimatedVnd(l.estimatedValue), 0);
+    const grpWon = grpLeads.filter((l) => l.status === "Chốt thành công").length;
     const pct = leads.length > 0 ? grpLeads.length / leads.length : 0;
     const z = idx % 2 === 1;
     sheet.rows.push({
@@ -768,7 +748,7 @@ function buildLeadOverviewSheet(
         { col: 1, value: g.name, style: sIdx("cellBold", z) },
         { col: 2, value: grpLeads.length, type: "num", style: sIdx("cellInt", z) },
         { col: 3, value: pct, type: "num", style: sIdx("cellPercent", z) },
-        { col: 4, value: grpVnd, type: "num", style: sIdx("cellCurrency", z) },
+        { col: 4, value: grpWon, type: "num", style: sIdx("cellInt", z) },
         { col: 5, value: g.desc, style: sIdx("cellNote", z) },
       ],
     });
@@ -777,26 +757,26 @@ function buildLeadOverviewSheet(
   r += 1;
 
   // Section 4: Sales Leaderboard
-  addMergedBanner(sheet, r++, 1, 5, "IV. THỐNG KÊ PHÂN BỔ LEAD & HIỆU SUẤT NHÂN SỰ SALES", "sectionHeader", 26);
+  addMergedBanner(sheet, r++, 1, 5, "IV. THỐNG KÊ PHÂN BỔ LEAD THEO NHÂN VIÊN KINH DOANH", "sectionHeader", 26);
   sheet.rows.push({
     row: r++,
     height: 27,
     cells: [
-      { col: 1, value: "Nhân sự Kinh doanh (Sales)", style: sIdx("thLeft") },
+      { col: 1, value: "Nhân viên kinh doanh", style: sIdx("thLeft") },
       { col: 2, value: "Tổng Lead phụ trách", style: sIdx("thRight") },
-      { col: 3, value: "Số dự án đã chốt", style: sIdx("thRight") },
-      { col: 4, value: "Tổng giá trị phụ trách", style: sIdx("thRight") },
+      { col: 3, value: "Đã gửi báo giá", style: sIdx("thRight") },
+      { col: 4, value: "Chốt thành công", style: sIdx("thRight") },
       { col: 5, value: "Tỷ lệ chốt cá nhân", style: sIdx("thRight") },
     ],
   });
 
-  const salesPerf = new Map<string, { total: number; won: number; vnd: number }>();
+  const salesPerf = new Map<string, { total: number; sentQuote: number; won: number }>();
   leads.forEach((l) => {
     const name = l.salesPerson?.name || "Chưa phân công";
-    const cur = salesPerf.get(name) || { total: 0, won: 0, vnd: 0 };
+    const cur = salesPerf.get(name) || { total: 0, sentQuote: 0, won: 0 };
     cur.total += 1;
+    if (l.status === "Đã gửi báo giá") cur.sentQuote += 1;
     if (l.status === "Chốt thành công") cur.won += 1;
-    cur.vnd += parseEstimatedVnd(l.estimatedValue);
     salesPerf.set(name, cur);
   });
 
@@ -810,12 +790,99 @@ function buildLeadOverviewSheet(
         cells: [
           { col: 1, value: `#${idx + 1} · ${salesName}`, style: sIdx("cellBold", z) },
           { col: 2, value: p.total, type: "num", style: sIdx("cellInt", z) },
-          { col: 3, value: p.won, type: "num", style: sIdx("cellInt", z) },
-          { col: 4, value: p.vnd, type: "num", style: sIdx("cellCurrency", z) },
+          { col: 3, value: p.sentQuote, type: "num", style: sIdx("cellInt", z) },
+          { col: 4, value: p.won, type: "num", style: sIdx("cellInt", z) },
           { col: 5, value: p.total > 0 ? p.won / p.total : 0, type: "num", style: sIdx("cellPercent", z) },
         ],
       });
     });
+
+  return sheet;
+}
+
+/**
+ * Sheet chuẩn mẫu Brief (AC-20, AC-22, AC-24):
+ * Tên nhân viên kinh doanh | Ngày nhận Lead | Tên khách hàng | Số điện thoại | Nhu cầu / Sản phẩm | Tình trạng Lead | Ghi chú
+ */
+function buildSalesBriefAllocationSheet(leads: Lead[], metaInfo: string): SheetSpec {
+  const colWidths = [24, 20, 26, 16, 36, 20, 38];
+  const totalCols = colWidths.length;
+  const sheet: SheetSpec = {
+    name: "2. Phân Bổ Theo Sales (Brief)",
+    tabColorRgb: "FF2563EB",
+    colWidths,
+    freezeRow: 5,
+    merges: [],
+    rows: [],
+  };
+
+  addCorporateHeader(
+    sheet,
+    totalCols,
+    "BÁO CÁO PHÂN BỔ LEAD THEO NHÂN VIÊN KINH DOANH (MẪU BRIEF)",
+    "Đúng 7 cột chuẩn nghiệp vụ: Tên NV kinh doanh, Ngày nhận Lead, Tên khách hàng, Số điện thoại (Text giữ số 0), Nhu cầu/Sản phẩm, Tình trạng Lead, Ghi chú",
+    metaInfo
+  );
+
+  const headers = [
+    { label: "Tên nhân viên kinh doanh", align: "thLeft" as StyleName },
+    { label: "Ngày nhận Lead", align: "thCenter" as StyleName },
+    { label: "Tên khách hàng", align: "thLeft" as StyleName },
+    { label: "Số điện thoại", align: "thCenter" as StyleName },
+    { label: "Nhu cầu / Sản phẩm", align: "thLeft" as StyleName },
+    { label: "Tình trạng Lead", align: "thCenter" as StyleName },
+    { label: "Ghi chú", align: "thLeft" as StyleName },
+  ];
+
+  sheet.rows.push({
+    row: 5,
+    height: 30,
+    cells: headers.map((h, i) => ({
+      col: i + 1,
+      value: h.label,
+      style: sIdx(h.align),
+    })),
+  });
+
+  let r = 6;
+  const startDataRow = r;
+
+  leads.forEach((lead, idx) => {
+    const z = idx % 2 === 1;
+    const demandLabel = lead.demandType
+      ? `${lead.product} (${lead.demandType})`
+      : lead.product;
+    const noteText =
+      lead.status === "Thất bại" && lead.failureReason
+        ? `[Lý do: ${lead.failureReason}] ${lead.notes || ""}`.trim()
+        : lead.notes || "—";
+
+    sheet.rows.push({
+      row: r++,
+      height: 28,
+      cells: [
+        { col: 1, value: lead.salesPerson?.name || "Chưa phân công", style: sIdx("cellBold", z), type: "str" },
+        { col: 2, value: lead.createdAtTime || lead.createdAt, style: sIdx("cellCenter", z), type: "str" },
+        {
+          col: 3,
+          value: lead.companyName ? `${lead.customerName} (${lead.companyName})` : lead.customerName,
+          style: sIdx("cellBold", z),
+          type: "str",
+        },
+        { col: 4, value: String(lead.phone || ""), style: sIdx("cellPhone", z), type: "str" },
+        { col: 5, value: demandLabel, style: sIdx("cellText", z), type: "str" },
+        { col: 6, value: lead.status, style: statusBadgeStyle(lead.status), type: "str" },
+        { col: 7, value: noteText, style: sIdx("cellNote", z), type: "str" },
+      ],
+    });
+  });
+
+  const endDataRow = Math.max(startDataRow, r - 1);
+  if (leads.length > 0) {
+    sheet.autoFilterRef = `A5:${colToLetter(totalCols)}${endDataRow}`;
+  } else {
+    addEmptyTableRow(sheet, r, totalCols, "Hiện chưa có hồ sơ Lead nào trong kỳ báo cáo.");
+  }
 
   return sheet;
 }
@@ -828,9 +895,7 @@ function buildLeadDetailsSheet(
   metaInfo: string,
   includeFollowUpAdvice = false
 ): SheetSpec {
-  const colWidths = includeFollowUpAdvice
-    ? [6, 15, 22, 28, 15, 25, 16, 34, 19, 17, 15, 19, 20, 14, 34]
-    : [6, 15, 22, 28, 15, 25, 16, 34, 19, 17, 15, 19, 17, 20, 14, 34];
+  const colWidths = [6, 15, 24, 26, 16, 24, 18, 34, 16, 16, 19, 20, 18, 18, 36];
 
   const totalCols = colWidths.length;
   const sheet: SheetSpec = {
@@ -846,47 +911,30 @@ function buildLeadDetailsSheet(
     sheet,
     totalCols,
     bannerTitle,
-    "Bảng dữ liệu chuẩn hóa có bộ lọc AutoFilter, cố định dòng tiêu đề (Freeze Panes) và công thức tính tổng tự động",
+    "Bảng dữ liệu chuẩn hóa có bộ lọc AutoFilter, cố định dòng tiêu đề (Freeze Panes) và giữ nguyên số 0 đầu của SĐT",
     metaInfo
   );
 
-  // Header at row 5
-  const headers = includeFollowUpAdvice
-    ? [
-        { label: "STT", align: "thCenter" as StyleName },
-        { label: "Mã Lead", align: "thCenter" as StyleName },
-        { label: "Tên Khách Hàng", align: "thLeft" as StyleName },
-        { label: "Công Ty / Tổ Chức", align: "thLeft" as StyleName },
-        { label: "Số Điện Thoại", align: "thCenter" as StyleName },
-        { label: "Email Liên Hệ", align: "thLeft" as StyleName },
-        { label: "Nhóm SP", align: "thCenter" as StyleName },
-        { label: "Sản Phẩm / Dự Án Quan Tâm", align: "thLeft" as StyleName },
-        { label: "Dự Toán (VNĐ)", align: "thRight" as StyleName },
-        { label: "Tỉnh / Thành Phố", align: "thCenter" as StyleName },
-        { label: "Nguồn Khách", align: "thCenter" as StyleName },
-        { label: "Trạng Thái Báo Giá", align: "thCenter" as StyleName },
-        { label: "Sales Phụ Trách", align: "thLeft" as StyleName },
-        { label: "Ngày Nhận", align: "thCenter" as StyleName },
-        { label: "Hành Động Bám Sát & Ghi Chú", align: "thLeft" as StyleName },
-      ]
-    : [
-        { label: "STT", align: "thCenter" as StyleName },
-        { label: "Mã Lead", align: "thCenter" as StyleName },
-        { label: "Tên Khách Hàng", align: "thLeft" as StyleName },
-        { label: "Công Ty / Tổ Chức", align: "thLeft" as StyleName },
-        { label: "Số Điện Thoại", align: "thCenter" as StyleName },
-        { label: "Email Liên Hệ", align: "thLeft" as StyleName },
-        { label: "Nhóm SP", align: "thCenter" as StyleName },
-        { label: "Sản Phẩm / Dự Án Quan Tâm", align: "thLeft" as StyleName },
-        { label: "Dự Toán (VNĐ)", align: "thRight" as StyleName },
-        { label: "Tỉnh / Thành Phố", align: "thCenter" as StyleName },
-        { label: "Nguồn Khách", align: "thCenter" as StyleName },
-        { label: "Trạng Thái Tiến Độ", align: "thCenter" as StyleName },
-        { label: "Kiểm Tra Trùng", align: "thCenter" as StyleName },
-        { label: "Sales Phụ Trách", align: "thLeft" as StyleName },
-        { label: "Ngày Nhận", align: "thCenter" as StyleName },
-        { label: "Ghi Chú Chăm Sóc", align: "thLeft" as StyleName },
-      ];
+  const headers = [
+    { label: "STT", align: "thCenter" as StyleName },
+    { label: "Mã Lead", align: "thCenter" as StyleName },
+    { label: "Tên Khách Hàng", align: "thLeft" as StyleName },
+    { label: "Công Ty / Tổ Chức", align: "thLeft" as StyleName },
+    { label: "Số Điện Thoại", align: "thCenter" as StyleName },
+    { label: "Email Liên Hệ", align: "thLeft" as StyleName },
+    { label: "Nhóm SP", align: "thCenter" as StyleName },
+    { label: "Sản Phẩm / Dự Án Quan Tâm", align: "thLeft" as StyleName },
+    { label: "Loại Nhu Cầu", align: "thCenter" as StyleName },
+    { label: "Nguồn Khách", align: "thCenter" as StyleName },
+    { label: "Trạng Thái Tiến Độ", align: "thCenter" as StyleName },
+    { label: "Phản Hồi Báo Giá", align: "thCenter" as StyleName },
+    { label: "Sales Phụ Trách", align: "thLeft" as StyleName },
+    { label: "Ngày Nhận", align: "thCenter" as StyleName },
+    {
+      label: includeFollowUpAdvice ? "Hành Động Bám Sát & Ghi Chú" : "Ghi Chú Chăm Sóc",
+      align: "thLeft" as StyleName,
+    },
+  ];
 
   sheet.rows.push({
     row: 5,
@@ -898,110 +946,65 @@ function buildLeadDetailsSheet(
     })),
   });
 
-  const dups = detectDuplicateSet(leads);
   let r = 6;
   const startDataRow = r;
-  let totalVnd = 0;
 
   leads.forEach((lead, idx) => {
     const z = idx % 2 === 1;
-    const vnd = parseEstimatedVnd(lead.estimatedValue);
-    totalVnd += vnd;
-    const isDup = dups.has(lead.id);
     const prodGroup = classifyProductGroupLabel(lead);
-    const estimateCell: CellSpec =
-      vnd > 0
-        ? { col: 9, value: vnd, type: "num", style: sIdx("cellCurrency", z) }
-        : { col: 9, value: lead.estimatedValue || "Đang khảo sát", style: sIdx("cellNote", z) };
+    const quoteRespLabel =
+      lead.status === "Đã gửi báo giá"
+        ? lead.customerResponded
+          ? "Đã phản hồi"
+          : "Chưa phản hồi"
+        : lead.customerResponded
+          ? "Đã phản hồi"
+          : "—";
 
-    if (includeFollowUpAdvice) {
-      const advice =
-        lead.status === "Đã gửi báo giá"
-          ? `[ƯU TIÊN GỌI CHỐT] ${lead.notes || "Liên hệ xác nhận phản hồi báo giá & lịch khảo sát"}`
-          : `[HOÀN THIỆN BÁO GIÁ] ${lead.notes || "Hoàn tất bản vẽ kỹ thuật & gửi báo giá"}`;
+    const noteText = includeFollowUpAdvice
+      ? lead.status === "Đã gửi báo giá" && !lead.customerResponded
+        ? `[CHỜ PHẢN HỒI BÁO GIÁ] ${lead.notes || "Liên hệ xác nhận phản hồi báo giá"}`
+        : `${lead.notes || "Bám sát tiến độ báo giá"}`
+      : lead.status === "Thất bại" && lead.failureReason
+        ? `[Lý do thất bại: ${lead.failureReason}] ${lead.notes || ""}`.trim()
+        : lead.notes || "—";
 
-      sheet.rows.push({
-        row: r++,
-        height: 28,
-        cells: [
-          { col: 1, value: idx + 1, type: "num", style: sIdx("cellCenter", z) },
-          { col: 2, value: lead.code, style: sIdx("cellCode", z) },
-          { col: 3, value: lead.customerName, style: sIdx("cellBold", z) },
-          { col: 4, value: lead.companyName, style: sIdx("cellText", z) },
-          { col: 5, value: lead.phone, style: sIdx("cellPhone", z) },
-          { col: 6, value: lead.email || "—", style: sIdx("cellText", z) },
-          { col: 7, value: prodGroup, style: sIdx("cellCenter", z) },
-          { col: 8, value: lead.product, style: sIdx("cellText", z) },
-          estimateCell,
-          { col: 10, value: lead.location, style: sIdx("cellCenter", z) },
-          { col: 11, value: lead.source, style: sIdx("cellCenter", z) },
-          { col: 12, value: lead.status, style: statusBadgeStyle(lead.status) },
-          { col: 13, value: lead.salesPerson?.name || "Chưa phân công", style: sIdx("cellBold", z) },
-          { col: 14, value: lead.createdAt, style: sIdx("cellCenter", z) },
-          { col: 15, value: advice, style: sIdx("cellNote", z) },
-        ],
-      });
-    } else {
-      const noteText =
-        lead.status === "Thất bại" && lead.failureReason
-          ? `[Lý do thất bại: ${lead.failureReason}] ${lead.notes || ""}`.trim()
-          : lead.notes || "—";
-
-      sheet.rows.push({
-        row: r++,
-        height: 28,
-        cells: [
-          { col: 1, value: idx + 1, type: "num", style: sIdx("cellCenter", z) },
-          { col: 2, value: lead.code, style: sIdx("cellCode", z) },
-          { col: 3, value: lead.customerName, style: sIdx("cellBold", z) },
-          { col: 4, value: lead.companyName, style: sIdx("cellText", z) },
-          { col: 5, value: lead.phone, style: sIdx("cellPhone", z) },
-          { col: 6, value: lead.email || "—", style: sIdx("cellText", z) },
-          { col: 7, value: prodGroup, style: sIdx("cellCenter", z) },
-          { col: 8, value: lead.product, style: sIdx("cellText", z) },
-          estimateCell,
-          { col: 10, value: lead.location, style: sIdx("cellCenter", z) },
-          { col: 11, value: lead.source, style: sIdx("cellCenter", z) },
-          { col: 12, value: lead.status, style: statusBadgeStyle(lead.status) },
-          {
-            col: 13,
-            value: isDup ? "Cảnh báo trùng" : "Hợp lệ",
-            style: isDup ? sIdx("badgeRose") : sIdx("badgeEmerald"),
-          },
-          { col: 14, value: lead.salesPerson?.name || "Chưa phân công", style: sIdx("cellBold", z) },
-          { col: 15, value: lead.createdAt, style: sIdx("cellCenter", z) },
-          { col: 16, value: noteText, style: sIdx("cellNote", z) },
-        ],
-      });
-    }
+    sheet.rows.push({
+      row: r++,
+      height: 28,
+      cells: [
+        { col: 1, value: idx + 1, type: "num", style: sIdx("cellCenter", z) },
+        { col: 2, value: lead.code, style: sIdx("cellCode", z), type: "str" },
+        { col: 3, value: lead.customerName, style: sIdx("cellBold", z), type: "str" },
+        { col: 4, value: lead.companyName || "—", style: sIdx("cellText", z), type: "str" },
+        { col: 5, value: String(lead.phone || ""), style: sIdx("cellPhone", z), type: "str" },
+        { col: 6, value: lead.email || "—", style: sIdx("cellText", z), type: "str" },
+        { col: 7, value: prodGroup, style: sIdx("cellCenter", z), type: "str" },
+        { col: 8, value: lead.product, style: sIdx("cellText", z), type: "str" },
+        { col: 9, value: lead.demandType || "—", style: sIdx("cellCenter", z), type: "str" },
+        { col: 10, value: lead.source, style: sIdx("cellCenter", z), type: "str" },
+        { col: 11, value: lead.status, style: statusBadgeStyle(lead.status), type: "str" },
+        {
+          col: 12,
+          value: quoteRespLabel,
+          style:
+            quoteRespLabel === "Chưa phản hồi"
+              ? sIdx("badgeAmber")
+              : quoteRespLabel === "Đã phản hồi"
+                ? sIdx("badgeEmerald")
+                : sIdx("cellCenter", z),
+          type: "str",
+        },
+        { col: 13, value: lead.salesPerson?.name || "Chưa phân công", style: sIdx("cellBold", z), type: "str" },
+        { col: 14, value: lead.createdAtTime || lead.createdAt, style: sIdx("cellCenter", z), type: "str" },
+        { col: 15, value: noteText, style: sIdx("cellNote", z), type: "str" },
+      ],
+    });
   });
 
   const endDataRow = Math.max(startDataRow, r - 1);
   if (leads.length > 0) {
     sheet.autoFilterRef = `A5:${colToLetter(totalCols)}${endDataRow}`;
-
-    const totalCells: CellSpec[] = [];
-    for (let c = 1; c <= totalCols; c++) {
-      if (c === 1) {
-        totalCells.push({ col: c, value: "TỔNG", style: sIdx("totalCenter") });
-      } else if (c === 3) {
-        totalCells.push({
-          col: c,
-          value: `TỔNG CỘNG (${leads.length} DỰ ÁN LEAD)`,
-          style: sIdx("totalLabel"),
-        });
-      } else if (c === 9) {
-        totalCells.push({
-          col: c,
-          formula: `SUM(I${startDataRow}:I${endDataRow})`,
-          value: totalVnd,
-          style: sIdx("totalCurrency"),
-        });
-      } else {
-        totalCells.push({ col: c, value: "", style: sIdx("totalLabel") });
-      }
-    }
-    sheet.rows.push({ row: r, height: 28, cells: totalCells });
   } else {
     addEmptyTableRow(sheet, r, totalCols, "Hiện chưa có dự án Lead nào thuộc danh mục này trong kỳ báo cáo.");
   }
@@ -1025,21 +1028,22 @@ export async function exportLeadsWorkbook(options: {
 
   const sheets: SheetSpec[] = [
     buildLeadOverviewSheet(leads, stats, metaInfo),
+    buildSalesBriefAllocationSheet(leads, metaInfo),
+    buildLeadDetailsSheet(
+      quotingLeads,
+      "3. Báo Giá & Chưa Phản Hồi",
+      "FFF59E0B",
+      "DANH SÁCH KHÁCH HÀNG ĐÃ GỬI BÁO GIÁ & THEO DÕI PHẢN HỒI",
+      `Ngày xuất: ${nowStr}   |   Tổng số dự án báo giá cần theo sát: ${quotingLeads.length} hồ sơ`,
+      true
+    ),
     buildLeadDetailsSheet(
       leads,
-      "2. Danh Sách Lead Chi Tiết",
+      "4. Danh Sách Lead Chi Tiết",
       "FFF97316",
       "DANH SÁCH CHI TIẾT KHÁCH HÀNG TIỀM NĂNG (MODULE 1)",
       metaInfo,
       false
-    ),
-    buildLeadDetailsSheet(
-      quotingLeads,
-      "3. Báo Giá Cần Bám Sát",
-      "FFF59E0B",
-      "DANH SÁCH KHÁCH HÀNG ĐANG & ĐÃ GỬI BÁO GIÁ CẦN BÁM SÁT (FOLLOW-UP)",
-      `Ngày xuất: ${nowStr}   |   Tổng số dự án đang báo giá cần Sales theo sát: ${quotingLeads.length} dự án`,
-      true
     ),
   ];
 
@@ -1048,15 +1052,16 @@ export async function exportLeadsWorkbook(options: {
 }
 
 /* ============================================================================
-   2. EXECUTIVE & DEPARTMENT REPORTS WORKBOOK (4 SHEETS)
+   2. EXECUTIVE & DEPARTMENT REPORTS WORKBOOK (5 SHEETS)
    ============================================================================ */
 
 const DEPT_NAME_MAP: Record<string, { label: string; style: StyleName }> = {
   ADMIN: { label: "Ban Giám Đốc", style: "badgeRose" },
+  DIRECTOR: { label: "Ban Giám Đốc", style: "badgeRose" },
   SALES: { label: "Phòng Kinh Doanh", style: "badgeBlue" },
   MARKETING: { label: "Phòng Marketing", style: "badgeEmerald" },
   ADS: { label: "Bộ Phận Quảng Cáo (ADS)", style: "badgeAmber" },
-  DESIGN: { label: "Phòng AI Design", style: "badgeViolet" },
+  DESIGN: { label: "Phòng Thiết Kế", style: "badgeViolet" },
 };
 
 export async function exportExecutiveReportsWorkbook(options: {
@@ -1078,9 +1083,8 @@ export async function exportExecutiveReportsWorkbook(options: {
     (l) => l.status === "Đang soạn báo giá" || l.status === "Đã gửi báo giá"
   );
 
-  // Build Sheet 4: Department Reports
   const deptSheet: SheetSpec = {
-    name: "4. Báo Cáo Phòng Ban",
+    name: "5. Báo Cáo Phòng Ban",
     tabColorRgb: "FF10B981",
     colWidths: [7, 24, 34, 22, 20, 22, 16, 52],
     freezeRow: 5,
@@ -1150,17 +1154,18 @@ export async function exportExecutiveReportsWorkbook(options: {
 
   const sheets: SheetSpec[] = [
     buildLeadOverviewSheet(leads, undefined, metaInfo),
+    buildSalesBriefAllocationSheet(leads, metaInfo),
     buildLeadDetailsSheet(
       quotingLeads,
-      "2. Báo Giá Cần Bám Sát",
+      "3. Báo Giá & Chưa Phản Hồi",
       "FFF59E0B",
-      "DANH SÁCH KHÁCH HÀNG ĐÃ GỬI BÁO GIÁ CẦN THEO DÕI CHỐT ĐƠN",
+      "DANH SÁCH KHÁCH HÀNG ĐÃ GỬI BÁO GIÁ & CHƯA PHẢN HỒI",
       metaInfo,
       true
     ),
     buildLeadDetailsSheet(
       leads,
-      "3. Toàn Bộ Dự Án Lead",
+      "4. Toàn Bộ Dự Án Lead",
       "FFF97316",
       "BẢNG CHI TIẾT TOÀN BỘ KHÁCH HÀNG TIỀM NĂNG TRONG HỆ THỐNG",
       metaInfo,
@@ -1207,7 +1212,6 @@ export async function exportAdsKeywordsWorkbook(options: {
   const nowStr = new Date().toLocaleString("vi-VN");
   const metaInfo = `Ngày xuất báo cáo: ${nowStr}   |   Phân hệ: Module 03 — Quảng Cáo Đa Kênh & Phân Tích Từ Khóa Toàn Trung`;
 
-  // SHEET 1: TỔNG QUAN ADS
   const overviewSheet: SheetSpec = {
     name: "1. Tổng Quan Hiệu Suất Ads",
     tabColorRgb: "FF2563EB",
@@ -1220,7 +1224,7 @@ export async function exportAdsKeywordsWorkbook(options: {
     overviewSheet,
     5,
     "BÁO CÁO HIỆU SUẤT QUẢNG CÁO ĐA KÊNH & TỐI ƯU NGÂN SÁCH ADS",
-    "Tổng hợp ngân sách chiến dịch Google Ads, Facebook Ads, TikTok Ads, Zalo Ads & SEO Màn hình LED",
+    "Tổng hợp hiệu suất chiến dịch Google Ads, Facebook Ads, TikTok Ads, Zalo Ads & SEO Màn hình LED",
     metaInfo
   );
 
@@ -1317,7 +1321,7 @@ export async function exportAdsKeywordsWorkbook(options: {
   const campSheet: SheetSpec = {
     name: "2. Chiến Dịch Quảng Cáo",
     tabColorRgb: "FFF59E0B",
-    colWidths: [7, 18, 38, 18, 22, 22, 22, 16, 18],
+    colWidths: [7, 18, 36, 18, 20, 20, 18, 18, 16],
     freezeRow: 5,
     merges: [],
     rows: [],
@@ -1326,8 +1330,8 @@ export async function exportAdsKeywordsWorkbook(options: {
   addCorporateHeader(
     campSheet,
     9,
-    "DANH SÁCH CHI TIẾT CHIẾN DỊCH QUẢNG CÁO & TIẾN ĐỘ GIẢI NGÂN",
-    "Tự động tính Ngân sách còn lại (=Ngân sách - Đã tiêu) và Tỷ lệ giải ngân (%) bằng công thức Excel",
+    "DANH SÁCH CHI TIẾT CHIẾN DỊCH QUẢNG CÁO & CHUYỂN ĐỔI",
+    "Phân biệt rõ Chuyển đổi nền tảng Ads và Lead thực tế ghi nhận trong CRM",
     metaInfo
   );
 
@@ -1341,8 +1345,8 @@ export async function exportAdsKeywordsWorkbook(options: {
       { col: 4, value: "Nền Tảng", style: sIdx("thCenter") },
       { col: 5, value: "Ngân Sách Cấp (VNĐ)", style: sIdx("thRight") },
       { col: 6, value: "Đã Giải Ngân (VNĐ)", style: sIdx("thRight") },
-      { col: 7, value: "Ngân Sách Còn Lại", style: sIdx("thRight") },
-      { col: 8, value: "Tỷ Lệ Tiêu (%)", style: sIdx("thRight") },
+      { col: 7, value: "Chuyển Đổi Nền Tảng Ads", style: sIdx("thRight") },
+      { col: 8, value: "Lead Thực Tế Ghi Nhận CRM", style: sIdx("thRight") },
       { col: 9, value: "Trạng Thái", style: sIdx("thCenter") },
     ],
   });
@@ -1351,8 +1355,6 @@ export async function exportAdsKeywordsWorkbook(options: {
   const cStart = rc;
   campaigns.forEach((c, idx) => {
     const z = idx % 2 === 1;
-    const rem = (c.budget || 0) - (c.spent || 0);
-    const ratio = c.budget > 0 ? c.spent / c.budget : 0;
     const statusLabel =
       c.status === "Active" ? "Đang chạy" : c.status === "Paused" ? "Tạm dừng" : "Hoàn thành";
     const statusSt =
@@ -1372,14 +1374,8 @@ export async function exportAdsKeywordsWorkbook(options: {
         { col: 4, value: c.platform, style: platformBadgeStyle(c.platform) },
         { col: 5, value: c.budget, type: "num", style: sIdx("cellCurrency", z) },
         { col: 6, value: c.spent, type: "num", style: sIdx("cellCurrency", z) },
-        { col: 7, formula: `E${rc}-F${rc}`, value: rem, style: sIdx("cellCurrency", z) },
-        {
-          col: 8,
-          formula: c.budget > 0 ? `F${rc}/E${rc}` : undefined,
-          value: ratio,
-          type: "num",
-          style: sIdx("cellPercent", z),
-        },
+        { col: 7, value: c.platformConversions ?? c.conversions ?? 0, type: "num", style: sIdx("cellInt", z) },
+        { col: 8, value: c.crmLeadsFromAds ?? 0, type: "num", style: sIdx("cellInt", z) },
         { col: 9, value: statusLabel, style: statusSt },
       ],
     });
@@ -1389,31 +1385,6 @@ export async function exportAdsKeywordsWorkbook(options: {
   const cEnd = Math.max(cStart, rc - 1);
   if (campaigns.length > 0) {
     campSheet.autoFilterRef = `A5:I${cEnd}`;
-    campSheet.rows.push({
-      row: rc,
-      height: 28,
-      cells: [
-        { col: 1, value: "TỔNG", style: sIdx("totalCenter") },
-        { col: 2, value: `${campaigns.length} CD`, style: sIdx("totalCenter") },
-        { col: 3, value: "TỔNG NGÂN SÁCH & CHI TIÊU TOÀN HỆ THỐNG", style: sIdx("totalLabel") },
-        { col: 4, value: "", style: sIdx("totalCenter") },
-        { col: 5, formula: `SUM(E${cStart}:E${cEnd})`, value: totalBudget, style: sIdx("totalCurrency") },
-        { col: 6, formula: `SUM(F${cStart}:F${cEnd})`, value: totalSpent, style: sIdx("totalCurrency") },
-        {
-          col: 7,
-          formula: `SUM(G${cStart}:G${cEnd})`,
-          value: totalBudget - totalSpent,
-          style: sIdx("totalCurrency"),
-        },
-        {
-          col: 8,
-          value: totalBudget > 0 ? totalSpent / totalBudget : 0,
-          type: "num",
-          style: sIdx("totalPercent"),
-        },
-        { col: 9, value: "Đối soát OK", style: sIdx("totalCenter") },
-      ],
-    });
   }
 
   // SHEET 3: PHÂN TÍCH TỪ KHÓA & TỐI ƯU CPC
@@ -1439,10 +1410,10 @@ export async function exportAdsKeywordsWorkbook(options: {
     height: 30,
     cells: [
       { col: 1, value: "STT", style: sIdx("thCenter") },
-      { col: 2, value: "Từ Khóa Tìm Kiếm (Keyword)", style: sIdx("thLeft") },
+      { col: 2, value: "Từ Khóa Tìm Kiếm", style: sIdx("thLeft") },
       { col: 3, value: "Nguồn Dữ Liệu", style: sIdx("thCenter") },
       { col: 4, value: "Lượt Hiển Thị", style: sIdx("thRight") },
-      { col: 5, value: "Lượt Click", style: sIdx("thRight") },
+      { col: 5, value: "Lượt Nhấp", style: sIdx("thRight") },
       { col: 6, value: "Tỷ Lệ CTR", style: sIdx("thRight") },
       { col: 7, value: "CPC Trung Bình", style: sIdx("thRight") },
       { col: 8, value: "Vị Trí TB", style: sIdx("thCenter") },
@@ -1474,7 +1445,7 @@ export async function exportAdsKeywordsWorkbook(options: {
           style: sIdx("cellPercent", z),
         },
         { col: 7, value: kw.avgCpc, type: "num", style: sIdx("cellCurrency", z) },
-        { col: 8, value: `Top #${kw.avgPosition}`, style: sIdx("cellCenter", z) },
+        { col: 8, value: `Hạng #${kw.avgPosition}`, style: sIdx("cellCenter", z) },
         {
           col: 9,
           value: highCpc ? "Cần tối ưu giá thầu CPC" : "Hiệu quả chuyển đổi tốt",
@@ -1488,21 +1459,6 @@ export async function exportAdsKeywordsWorkbook(options: {
   const kEnd = Math.max(kStart, rk - 1);
   if (keywords.length > 0) {
     kwSheet.autoFilterRef = `A5:I${kEnd}`;
-    kwSheet.rows.push({
-      row: rk,
-      height: 28,
-      cells: [
-        { col: 1, value: "TỔNG", style: sIdx("totalCenter") },
-        { col: 2, value: `TỔNG CỘNG (${keywords.length} TỪ KHÓA)`, style: sIdx("totalLabel") },
-        { col: 3, value: "", style: sIdx("totalCenter") },
-        { col: 4, formula: `SUM(D${kStart}:D${kEnd})`, value: totalImpr, style: sIdx("totalInt") },
-        { col: 5, formula: `SUM(E${kStart}:E${kEnd})`, value: totalClicks, style: sIdx("totalInt") },
-        { col: 6, value: ctrVal, type: "num", style: sIdx("totalPercent") },
-        { col: 7, value: avgCpcVal, type: "num", style: sIdx("totalCurrency") },
-        { col: 8, value: "—", style: sIdx("totalCenter") },
-        { col: 9, value: "Đã phân tích", style: sIdx("totalCenter") },
-      ],
-    });
   }
 
   const dateTag = new Date().toISOString().slice(0, 10);
@@ -1526,11 +1482,10 @@ export async function exportTrackingWorkbook(options: {
   const nowStr = new Date().toLocaleString("vi-VN");
   const metaInfo = `Ngày xuất: ${nowStr}   |   Phân hệ: Module 02 — Tracking Đa Kênh & UTM   |   Tổng sự kiện ghi nhận: ${totalEvents || events.length}`;
 
-  // Sheet 1: Tracking Events
   const evSheet: SheetSpec = {
     name: "1. Nhật Ký Truy Cập & UTM",
     tabColorRgb: "FF0284C7",
-    colWidths: [7, 24, 16, 15, 26, 36, 16, 20, 20],
+    colWidths: [7, 24, 16, 15, 26, 36, 18, 22, 20],
     freezeRow: 5,
     merges: [],
     rows: [],
@@ -1550,10 +1505,10 @@ export async function exportTrackingWorkbook(options: {
     cells: [
       { col: 1, value: "STT", style: sIdx("thCenter") },
       { col: 2, value: "Website Nguồn", style: sIdx("thLeft") },
-      { col: 3, value: "Nguồn (Source)", style: sIdx("thCenter") },
-      { col: 4, value: "Kênh (Medium)", style: sIdx("thCenter") },
+      { col: 3, value: "Nguồn", style: sIdx("thCenter") },
+      { col: 4, value: "Kênh", style: sIdx("thCenter") },
       { col: 5, value: "Chiến Dịch (utm_campaign)", style: sIdx("thLeft") },
-      { col: 6, value: "Trang Đích (Landing Page)", style: sIdx("thLeft") },
+      { col: 6, value: "Trang Đích", style: sIdx("thLeft") },
       { col: 7, value: "Thiết Bị", style: sIdx("thCenter") },
       { col: 8, value: "Khu Vực / IP", style: sIdx("thCenter") },
       { col: 9, value: "Thời Gian Truy Cập", style: sIdx("thCenter") },
@@ -1568,13 +1523,13 @@ export async function exportTrackingWorkbook(options: {
       height: 26,
       cells: [
         { col: 1, value: idx + 1, type: "num", style: sIdx("cellCenter", z) },
-        { col: 2, value: ev.websiteSource, style: sIdx("cellBold", z) },
-        { col: 3, value: ev.source, style: sIdx("badgeBlue") },
-        { col: 4, value: ev.medium, style: sIdx("cellCenter", z) },
+        { col: 2, value: ev.websiteSource || "Chưa có thông tin", style: sIdx("cellBold", z) },
+        { col: 3, value: ev.source || "Chưa có thông tin", style: sIdx("badgeBlue") },
+        { col: 4, value: ev.medium || "Chưa có thông tin", style: sIdx("cellCenter", z) },
         { col: 5, value: ev.campaign || "Truy cập trực tiếp", style: sIdx("cellCode", z) },
-        { col: 6, value: ev.landingPage, style: sIdx("cellText", z) },
-        { col: 7, value: ev.device || "Desktop", style: sIdx("cellCenter", z) },
-        { col: 8, value: ev.location || ev.ipAddress || "Việt Nam", style: sIdx("cellCenter", z) },
+        { col: 6, value: ev.landingPage || "/", style: sIdx("cellText", z) },
+        { col: 7, value: ev.device || "Chưa có thông tin", style: sIdx("cellCenter", z) },
+        { col: 8, value: ev.location || ev.ipAddress || "Chưa có thông tin", style: sIdx("cellCenter", z) },
         {
           col: 9,
           value: new Date(ev.createdAt).toLocaleString("vi-VN"),
@@ -1588,7 +1543,6 @@ export async function exportTrackingWorkbook(options: {
     evSheet.autoFilterRef = `A5:I${re - 1}`;
   }
 
-  // Sheet 2: Sync Connectors Status
   const syncSheet: SheetSpec = {
     name: "2. Trạng Thái Đồng Bộ API",
     tabColorRgb: "FF10B981",
@@ -1615,7 +1569,7 @@ export async function exportTrackingWorkbook(options: {
       { col: 3, value: "Trạng Thái Kết Nối", style: sIdx("thCenter") },
       { col: 4, value: "Số Bản Ghi", style: sIdx("thRight") },
       { col: 5, value: "Đồng Bộ Gần Nhất", style: sIdx("thCenter") },
-      { col: 6, value: "Ghi Chú Kỹ Thuật", style: sIdx("thLeft") },
+      { col: 6, value: "Ghi Chú", style: sIdx("thLeft") },
     ],
   });
 
@@ -1631,7 +1585,7 @@ export async function exportTrackingWorkbook(options: {
         { col: 2, value: job.service, style: sIdx("cellBold", z) },
         {
           col: 3,
-          value: ok ? "Đồng bộ hoàn tất" : job.status,
+          value: ok ? "Đồng bộ hoàn tất" : "Chưa cấu hình / Chờ đồng bộ",
           style: ok ? sIdx("badgeEmerald") : sIdx("badgeAmber"),
         },
         { col: 4, value: job.recordsSynced || 0, type: "num", style: sIdx("cellInt", z) },

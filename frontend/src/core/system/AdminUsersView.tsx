@@ -1,11 +1,10 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   UserPlus,
   AlertCircle,
   Briefcase,
-  Building2,
   Award,
   ShieldCheck,
   Edit3,
@@ -46,9 +45,6 @@ interface UserRecord {
   appointedDecisionCode?: string | null;
   initials: string;
   avatar?: string | null;
-  address?: string | null;
-  hometown?: string | null;
-  achievements?: string | null;
   isActive: boolean;
   createdAt: string;
 }
@@ -83,10 +79,10 @@ interface PromotionDecisionRecord {
 }
 
 const ACTOR_FILTER_OPTIONS = [
-  { id: "ALL", label: "Tất cả tác nhân" },
-  { id: "ADMIN", label: "ADMIN (Quản trị)" },
-  { id: "DIRECTOR", label: "GIÁM ĐỐC" },
-  { id: "USER", label: "USER (Các phòng ban)" },
+  { id: "ALL", label: "Tất cả tài khoản" },
+  { id: "ADMIN", label: "Quản trị viên (Admin)" },
+  { id: "DIRECTOR", label: "Giám đốc" },
+  { id: "USER", label: "Nhân sự phòng ban" },
 ] as const;
 
 interface EditUserModalProps {
@@ -111,9 +107,6 @@ const EditUserModal = React.memo(function EditUserModal({
   const [editDepartment, setEditDepartment] = useState("SALES");
   const [editPosition, setEditPosition] = useState("Nhân viên");
   const [editDecisionId, setEditDecisionId] = useState("");
-  const [editAddress, setEditAddress] = useState("");
-  const [editHometown, setEditHometown] = useState("");
-  const [editAchievements, setEditAchievements] = useState("");
   const [editAvatar, setEditAvatar] = useState("");
   const [editIsActive, setEditIsActive] = useState(true);
   const [editNewPassword, setEditNewPassword] = useState("");
@@ -146,9 +139,6 @@ const EditUserModal = React.memo(function EditUserModal({
               : "Nhân viên")
       );
       setEditDecisionId("");
-      setEditAddress(editingUser.address || "");
-      setEditHometown(editingUser.hometown || "");
-      setEditAchievements(editingUser.achievements || "");
       setEditAvatar(editingUser.avatar || "");
       setEditIsActive(editingUser.isActive !== false);
       setEditNewPassword("");
@@ -211,9 +201,6 @@ const EditUserModal = React.memo(function EditUserModal({
           position: effectivePos,
           role: editActorType === "USER" ? effectiveDept : editActorType,
           decisionId: editDecisionId || null,
-          address: editAddress.trim() || null,
-          hometown: editHometown.trim() || null,
-          achievements: editAchievements.trim() || null,
           avatar: editAvatar.trim() || null,
           isActive: editIsActive,
           newPassword: editNewPassword.trim() || null,
@@ -240,8 +227,8 @@ const EditUserModal = React.memo(function EditUserModal({
       onClose={onClose}
       preventClose={isUpdatingUser}
       size="lg"
-      title={editingUser ? `Phân quyền & Hồ sơ: ${editingUser.name}` : "Chỉnh sửa tài khoản"}
-      description="Cập nhật Tác nhân (ADMIN / GIÁM ĐỐC / USER), Phòng ban và Chức vụ (yêu cầu Quyết định của Giám đốc khi bổ nhiệm Trưởng phòng/Trưởng ban)"
+      title={editingUser ? `Phân quyền & Tài khoản: ${editingUser.name}` : "Chỉnh sửa tài khoản"}
+      description="Cập nhật thông tin liên hệ, vai trò, phòng ban và trạng thái hoạt động của tài khoản"
       icon={
         editAvatar ? (
           <img src={editAvatar} alt={editName} className="w-full h-full rounded-lg object-cover" />
@@ -296,19 +283,30 @@ const EditUserModal = React.memo(function EditUserModal({
 
             <div>
               <label className="crm-label">
-                Email đăng nhập <span className="text-rose-500">*</span>
+                Email công việc <span className="text-rose-500">*</span>
               </label>
               <input
                 type="email"
                 required
                 value={editEmail}
                 onChange={(e) => setEditEmail(e.target.value)}
-                className="crm-input font-mono"
+                className="crm-input"
               />
             </div>
 
             <div>
-              <label className="crm-label">Tác nhân hệ thống (Actor)</label>
+              <label className="crm-label">Số điện thoại</label>
+              <input
+                type="tel"
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                placeholder="0909 xxx xxx"
+                className="crm-input"
+              />
+            </div>
+
+            <div>
+              <label className="crm-label">Nhóm tài khoản</label>
               <select
                 value={editActorType}
                 onChange={(e) =>
@@ -316,15 +314,15 @@ const EditUserModal = React.memo(function EditUserModal({
                 }
                 className="crm-select"
               >
-                <option value="USER">USER — Nhân sự thuộc các Phòng ban</option>
-                <option value="DIRECTOR">GIÁM ĐỐC — Ban Giám Đốc</option>
-                <option value="ADMIN">ADMIN — Quản trị hệ thống</option>
+                <option value="USER">Nhân sự thuộc Phòng ban</option>
+                <option value="DIRECTOR">Ban Giám Đốc</option>
+                <option value="ADMIN">Quản trị hệ thống (Admin)</option>
               </select>
             </div>
 
             {editActorType === "USER" && (
               <div>
-                <label className="crm-label">Phòng ban (trong USER)</label>
+                <label className="crm-label">Phòng ban</label>
                 <select
                   value={editDepartment}
                   onChange={(e) => setEditDepartment(e.target.value)}
@@ -349,10 +347,10 @@ const EditUserModal = React.memo(function EditUserModal({
                     className="crm-select"
                   >
                     <option value="Nhân viên">Nhân viên (Mặc định)</option>
-                    <option value="Trưởng nhóm">Trưởng nhóm (Cần QĐ Giám đốc)</option>
-                    <option value="Phó phòng">Phó phòng (Cần QĐ Giám đốc)</option>
-                    <option value="Trưởng ban">Trưởng ban (Cần QĐ Giám đốc)</option>
-                    <option value="Trưởng phòng">Trưởng phòng (Cần QĐ Giám đốc)</option>
+                    <option value="Trưởng nhóm">Trưởng nhóm</option>
+                    <option value="Phó phòng">Phó phòng</option>
+                    <option value="Trưởng ban">Trưởng ban</option>
+                    <option value="Trưởng phòng">Trưởng phòng</option>
                   </select>
                 </div>
 
@@ -368,7 +366,7 @@ const EditUserModal = React.memo(function EditUserModal({
                     <option value="">
                       {editingUser.appointedDecisionCode
                         ? `Đang áp dụng: ${editingUser.appointedDecisionCode}`
-                        : "-- Chọn thông báo Giám đốc đã ký --"}
+                        : "-- Chọn quyết định Giám đốc đã ký --"}
                     </option>
                     {decisions
                       .filter((d) => d.targetUserId === editingUser.id)
@@ -381,38 +379,17 @@ const EditUserModal = React.memo(function EditUserModal({
                 </div>
               </div>
             )}
-
-            <div>
-              <label className="crm-label">Số điện thoại</label>
-              <input
-                type="tel"
-                value={editPhone}
-                onChange={(e) => setEditPhone(e.target.value)}
-                placeholder="0909 xxx xxx"
-                className="crm-input"
-              />
-            </div>
-
-            <div>
-              <label className="crm-label">Địa chỉ cư trú</label>
-              <input
-                type="text"
-                value={editAddress}
-                onChange={(e) => setEditAddress(e.target.value)}
-                className="crm-input"
-              />
-            </div>
           </div>
 
           <div>
-            <label className="crm-label">Ảnh đại diện (Avatar)</label>
+            <label className="crm-label">Ảnh đại diện</label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={editAvatar}
                 onChange={(e) => setEditAvatar(e.target.value)}
-                placeholder="URL ảnh đại diện..."
-                className="crm-input font-mono flex-1"
+                placeholder="Đường dẫn ảnh đại diện..."
+                className="crm-input flex-1"
               />
               <label className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg bg-slate-100 hover:bg-slate-200/80 border border-slate-200 text-xs font-medium text-slate-700 cursor-pointer shrink-0">
                 <Camera className="w-3.5 h-3.5" />
@@ -435,7 +412,7 @@ const EditUserModal = React.memo(function EditUserModal({
                 value={editNewPassword}
                 onChange={(e) => setEditNewPassword(e.target.value)}
                 placeholder="Bỏ trống nếu giữ nguyên mật khẩu..."
-                className="crm-input font-mono"
+                className="crm-input"
               />
             </div>
 
@@ -459,7 +436,7 @@ const EditUserModal = React.memo(function EditUserModal({
                 ) : (
                   <>
                     <Lock className="w-3.5 h-3.5" />
-                    <span>Tạm khóa / Chờ Admin duyệt</span>
+                    <span>Tạm khóa</span>
                   </>
                 )}
               </button>
@@ -480,7 +457,6 @@ export function AdminUsersView() {
   const [toast, setToast] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
 
-  // Filter & Search state
   const [searchTerm, setSearchTerm] = useState("");
   const [actorFilter, setActorFilter] = useState("ALL");
   const [deptFilter, setDeptFilter] = useState("ALL");
@@ -488,13 +464,10 @@ export function AdminUsersView() {
   // Create User Form State
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("Password123@");
+  const [password, setPassword] = useState("");
   const [actorType, setActorType] = useState<"ADMIN" | "DIRECTOR" | "USER">("USER");
   const [department, setDepartment] = useState("SALES");
   const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
-  const [hometown, setHometown] = useState("");
-  const [achievements, setAchievements] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -513,7 +486,6 @@ export function AdminUsersView() {
   const [isSigningPromo, setIsSigningPromo] = useState(false);
   const [applyingDecisionId, setApplyingDecisionId] = useState<string | null>(null);
 
-  // Edit User Modal State (form fields isolated inside EditUserModal)
   const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
 
   const showToastMsg = (msg: string) => {
@@ -556,7 +528,7 @@ export function AdminUsersView() {
   };
 
   useEffect(() => {
-    fetchAllData();
+    void fetchAllData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -575,17 +547,14 @@ export function AdminUsersView() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name,
-          email,
+          name: name.trim(),
+          email: email.trim(),
           password,
           actorType,
           department: effectiveDept,
           position: effectivePos,
           role: actorType === "USER" ? effectiveDept : actorType,
-          phone: phone || null,
-          address: address || null,
-          hometown: hometown || null,
-          achievements: achievements || null,
+          phone: phone.trim() || null,
         }),
       });
       const json = await res.json();
@@ -596,12 +565,10 @@ export function AdminUsersView() {
       showToastMsg(json.message || "Tạo tài khoản thành công");
       setName("");
       setEmail("");
+      setPassword("");
       setPhone("");
-      setAddress("");
-      setHometown("");
-      setAchievements("");
       setShowAddForm(false);
-      fetchAllData();
+      await fetchAllData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Lỗi tạo tài khoản");
     } finally {
@@ -630,7 +597,7 @@ export function AdminUsersView() {
       setDeptCode("");
       setDeptName("");
       setDeptDesc("");
-      fetchAllData();
+      await fetchAllData();
     } catch (err) {
       showToastMsg(err instanceof Error ? err.message : "Lỗi tạo phòng ban");
     } finally {
@@ -661,7 +628,7 @@ export function AdminUsersView() {
       showToastMsg(json.message);
       setPromoTitle("");
       setPromoContent("");
-      fetchAllData();
+      await fetchAllData();
     } catch (err) {
       showToastMsg(err instanceof Error ? err.message : "Lỗi ký thông báo bổ nhiệm");
     } finally {
@@ -685,7 +652,7 @@ export function AdminUsersView() {
         throw new Error(json.error?.message || "Không thể cấp quyền");
       }
       showToastMsg(json.message);
-      fetchAllData();
+      await fetchAllData();
     } catch (err) {
       showToastMsg(err instanceof Error ? err.message : "Lỗi cấp quyền");
     } finally {
@@ -703,7 +670,8 @@ export function AdminUsersView() {
 
   const handleSavedEditUser = useCallback((msg: string) => {
     showToastMsg(msg);
-    fetchAllData();
+    void fetchAllData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const normalizeUserActor = (u: UserRecord): "ADMIN" | "DIRECTOR" | "USER" => {
@@ -741,8 +709,8 @@ export function AdminUsersView() {
       <Toast message={toast} onDismiss={() => setToast(null)} />
 
       <PageHeader
-        title="Quản trị Tác nhân (ADMIN · GIÁM ĐỐC · USER) & Bổ nhiệm"
-        description="Kiến trúc phân quyền chuẩn ATTT: 3 tác nhân độc lập, Admin quản lý phòng ban trong USER và chỉ cấp quyền chức vụ (Trưởng phòng/Trưởng ban) dựa trên Thông báo chúc mừng có chữ ký của Giám đốc."
+        title="Quản lý Tài khoản & Phân quyền"
+        description="Admin tạo và quản lý tài khoản nhân sự theo phòng ban, chức vụ và vai trò làm việc."
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -751,7 +719,7 @@ export function AdminUsersView() {
               leftIcon={<FileSignature className="w-4 h-4" />}
               onClick={() => setActiveSubTab("promotions")}
             >
-              Quyết định Giám đốc ({decisions.length})
+              Quyết định bổ nhiệm ({decisions.length})
             </Button>
             <Button
               variant={showAddForm ? "secondary" : "primary"}
@@ -762,58 +730,56 @@ export function AdminUsersView() {
                 setShowAddForm((prev) => !prev);
               }}
             >
-              {showAddForm ? "Đóng biểu mẫu" : "Thêm tài khoản"}
+              {showAddForm ? "Đóng biểu mẫu" : "Tạo tài khoản"}
             </Button>
           </div>
         }
       />
 
-      {/* 4 KPI Cards reflecting the 3-Actor Security Model */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard
-          label="Tác nhân ADMIN"
-          value={`${adminCount} Quản trị viên`}
+          label="Quản trị hệ thống"
+          value={`${adminCount} Admin`}
           icon={ShieldCheck}
           iconTone="blue"
-          note="Quản lý hệ thống, tạo phòng ban & thực thi cấp quyền"
+          note="Quản lý tài khoản, phòng ban và phân quyền"
         />
         <StatCard
-          label="Tác nhân GIÁM ĐỐC"
+          label="Ban Giám đốc"
           value={`${directorCount} Giám đốc`}
           icon={Award}
           iconTone="violet"
-          note="Điều hành & ký Thông báo chúc mừng bổ nhiệm"
+          note="Điều hành & ký quyết định bổ nhiệm"
         />
         <StatCard
-          label="Tác nhân USER"
+          label="Nhân sự phòng ban"
           value={`${userActorCount} Nhân sự`}
           icon={Users2}
           iconTone="emerald"
-          note={`Thuộc ${departments.length} phòng ban (Sales, MKT, Design, Ads...)`}
+          note={`Thuộc ${departments.length} phòng ban nghiệp vụ`}
         />
         <StatCard
-          label="Quyết định Bổ nhiệm"
+          label="Quyết định bổ nhiệm"
           value={`${decisions.length} Quyết định`}
           icon={Briefcase}
           iconTone="amber"
           note={
             pendingDecisionsCount > 0
-              ? `${pendingDecisionsCount} quyết định Giám đốc đã ký chờ Admin cấp quyền`
-              : "Tất cả quyết định của Giám đốc đã được cấp quyền"
+              ? `${pendingDecisionsCount} quyết định chờ Admin áp dụng`
+              : "Tất cả quyết định đã có hiệu lực"
           }
         />
       </div>
 
-      {/* Sub-navigation Tabs */}
       <UnderlineTabs
         value={activeSubTab}
         onChange={setActiveSubTab}
         options={[
-          { id: "actors", label: "1. Tác nhân & Nhân sự (ADMIN / GIÁM ĐỐC / USER)", count: users.length },
-          { id: "departments", label: "2. Phòng ban trong USER (Admin tạo)", count: departments.length },
+          { id: "actors", label: "1. Danh sách Tài khoản", count: users.length },
+          { id: "departments", label: "2. Phòng ban nghiệp vụ", count: departments.length },
           {
             id: "promotions",
-            label: "3. Thông báo chúc mừng Giám đốc ký & Admin cấp quyền",
+            label: "3. Quyết định bổ nhiệm",
             count: decisions.length,
           },
         ]}
@@ -824,13 +790,8 @@ export function AdminUsersView() {
           {showAddForm && (
             <div className="crm-card p-6 space-y-5 border-blue-200">
               <SectionHeader
-                title="Khởi tạo tài khoản theo chuẩn 3 Tác nhân (ADMIN · GIÁM ĐỐC · USER)"
-                description="Tác nhân USER mặc định ở cấp Nhân viên trong phòng ban được chọn. Việc nâng lên Trưởng phòng/Trưởng ban phải thông qua Quyết định của Giám đốc ký."
-                action={
-                  <StatusBadge tone="info" dot={false}>
-                    Chuẩn ATTT 3 Tác nhân
-                  </StatusBadge>
-                }
+                title="Tạo tài khoản nhân sự mới"
+                description="Chỉ Admin mới có quyền tạo tài khoản. Nhập đầy đủ Họ tên, Email công việc, Số điện thoại, Mật khẩu và Phòng ban."
               />
 
               {error && (
@@ -860,7 +821,7 @@ export function AdminUsersView() {
 
                 <div>
                   <label className="crm-label">
-                    Email đăng nhập <span className="text-rose-500">*</span>
+                    Email công việc <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="email"
@@ -868,7 +829,18 @@ export function AdminUsersView() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="crm-input font-mono"
+                    className="crm-input"
+                  />
+                </div>
+
+                <div>
+                  <label className="crm-label">Số điện thoại</label>
+                  <input
+                    type="tel"
+                    placeholder="VD: 0912 334 556"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="crm-input"
                   />
                 </div>
 
@@ -877,33 +849,34 @@ export function AdminUsersView() {
                     Mật khẩu khởi tạo <span className="text-rose-500">*</span>
                   </label>
                   <input
-                    type="text"
+                    type="password"
+                    placeholder="Tối thiểu 6 ký tự"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    className="crm-input font-mono"
+                    className="crm-input"
                   />
                 </div>
 
                 <div>
                   <label className="crm-label">
-                    Tác nhân hệ thống (Actor) <span className="text-rose-500">*</span>
+                    Nhóm tài khoản <span className="text-rose-500">*</span>
                   </label>
                   <select
                     value={actorType}
                     onChange={(e) => setActorType(e.target.value as "ADMIN" | "DIRECTOR" | "USER")}
                     className="crm-select"
                   >
-                    <option value="USER">USER — Nhân sự thuộc các Phòng ban</option>
-                    <option value="DIRECTOR">GIÁM ĐỐC — Ban Giám Đốc ký duyệt bổ nhiệm</option>
-                    <option value="ADMIN">ADMIN — Quản trị hệ thống &amp; Phòng ban</option>
+                    <option value="USER">Nhân sự thuộc Phòng ban</option>
+                    <option value="DIRECTOR">Ban Giám Đốc</option>
+                    <option value="ADMIN">Quản trị hệ thống (Admin)</option>
                   </select>
                 </div>
 
                 {actorType === "USER" ? (
                   <div>
                     <label className="crm-label">
-                      Phòng ban trong USER (Do Admin tạo) <span className="text-rose-500">*</span>
+                      Phòng ban <span className="text-rose-500">*</span>
                     </label>
                     <select
                       value={department}
@@ -923,22 +896,11 @@ export function AdminUsersView() {
                     <input
                       type="text"
                       disabled
-                      value={actorType === "ADMIN" ? "Quản trị hệ thống (ADMIN)" : "Giám đốc (DIRECTOR)"}
+                      value={actorType === "ADMIN" ? "Quản trị hệ thống" : "Giám đốc"}
                       className="crm-input opacity-75"
                     />
                   </div>
                 )}
-
-                <div>
-                  <label className="crm-label">Số điện thoại</label>
-                  <input
-                    type="text"
-                    placeholder="VD: 0912 334 556"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="crm-input"
-                  />
-                </div>
 
                 <div className="sm:col-span-2 lg:col-span-3 flex justify-end gap-2.5 pt-3 border-t border-slate-100">
                   <Button type="button" variant="secondary" onClick={() => setShowAddForm(false)}>
@@ -959,7 +921,7 @@ export function AdminUsersView() {
               <div className="p-3 border-b border-slate-200/80 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <SegmentedControl
-                    ariaLabel="Lọc theo tác nhân"
+                    ariaLabel="Lọc theo nhóm tài khoản"
                     value={actorFilter}
                     onChange={setActorFilter}
                     options={ACTOR_FILTER_OPTIONS.map((r) => ({
@@ -991,7 +953,7 @@ export function AdminUsersView() {
                 <SearchInput
                   value={searchTerm}
                   onChange={setSearchTerm}
-                  placeholder="Tìm tên, email, chức vụ, phòng ban..."
+                  placeholder="Tìm tên, email, SĐT, phòng ban..."
                   className="w-full xl:w-72"
                 />
               </div>
@@ -1000,18 +962,18 @@ export function AdminUsersView() {
                 <EmptyState
                   icon={Users2}
                   title="Không tìm thấy nhân sự phù hợp"
-                  description="Thử thay đổi bộ lọc Tác nhân, Phòng ban hoặc từ khóa tìm kiếm."
+                  description="Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm."
                 />
               ) : (
                 <div className="overflow-x-auto max-h-[640px]">
                   <table className="crm-table">
                     <thead>
                       <tr>
-                        <th>Nhân sự</th>
-                        <th>Tác nhân (Actor)</th>
-                        <th>Phòng ban (trong USER)</th>
-                        <th>Chức vụ &amp; Căn cứ bổ nhiệm</th>
-                        <th>Email &amp; Liên hệ</th>
+                        <th>Họ và tên</th>
+                        <th>Nhóm quyền</th>
+                        <th>Phòng ban</th>
+                        <th>Chức vụ</th>
+                        <th>Email &amp; Số điện thoại</th>
                         <th>Trạng thái</th>
                         <th className="text-right">Thao tác</th>
                       </tr>
@@ -1048,14 +1010,7 @@ export function AdminUsersView() {
                                     {u.initials}
                                   </div>
                                 )}
-                                <div>
-                                  <div className="font-semibold text-slate-900">{u.name}</div>
-                                  {u.achievements && (
-                                    <div className="text-[11px] text-slate-500 truncate max-w-[180px]">
-                                      {u.achievements}
-                                    </div>
-                                  )}
-                                </div>
+                                <div className="font-semibold text-slate-900">{u.name}</div>
                               </div>
                             </td>
 
@@ -1068,7 +1023,7 @@ export function AdminUsersView() {
                             <td className="py-3.5 px-4 whitespace-nowrap">
                               {uActor === "USER" ? (
                                 <StatusBadge tone={deptMeta.tone} size="sm" dot={false}>
-                                  {deptMeta.label} ({u.department || u.role})
+                                  {deptMeta.label}
                                 </StatusBadge>
                               ) : (
                                 <span className="text-xs font-medium text-slate-500">
@@ -1079,19 +1034,15 @@ export function AdminUsersView() {
 
                             <td className="py-3.5 px-4 whitespace-nowrap">
                               <div className="text-xs font-semibold text-slate-900">{pos}</div>
-                              {u.appointedDecisionCode ? (
+                              {u.appointedDecisionCode && (
                                 <div className="text-[11px] text-emerald-700 font-mono mt-0.5">
-                                  ✓ Giám đốc ký: {u.appointedDecisionCode}
-                                </div>
-                              ) : (
-                                <div className="text-[11px] text-slate-400 mt-0.5">
-                                  {uActor === "USER" ? "Cấp mặc định" : "Thẩm quyền gốc"}
+                                  QĐ: {u.appointedDecisionCode}
                                 </div>
                               )}
                             </td>
 
                             <td className="py-3.5 px-4">
-                              <div className="font-mono text-xs text-slate-800">{u.email}</div>
+                              <div className="text-xs text-slate-800">{u.email}</div>
                               <div className="text-xs text-slate-400 mt-0.5">
                                 {u.phone || "Chưa cập nhật SĐT"}
                               </div>
@@ -1104,7 +1055,7 @@ export function AdminUsersView() {
                                 </StatusBadge>
                               ) : (
                                 <StatusBadge tone="warning" size="sm">
-                                  Chờ duyệt / Đã khóa
+                                  Tạm khóa
                                 </StatusBadge>
                               )}
                             </td>
@@ -1119,7 +1070,7 @@ export function AdminUsersView() {
                                 leftIcon={<Edit3 className="w-3.5 h-3.5" />}
                                 onClick={() => openEditModal(u)}
                               >
-                                Phân quyền / Sửa
+                                Sửa
                               </Button>
                             </td>
                           </tr>
@@ -1138,21 +1089,21 @@ export function AdminUsersView() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           <div className="crm-card p-5 space-y-4">
             <SectionHeader
-              title="Admin khởi tạo Phòng ban mới"
-              description="Các phòng ban được tạo tại đây sẽ nằm trong Tác nhân USER (VD: Design, Kinh doanh, Kỹ thuật LED...)"
+              title="Tạo Phòng ban mới"
+              description="Khởi tạo phòng ban nghiệp vụ để phân công nhân sự"
             />
             <form onSubmit={handleCreateDepartment} className="space-y-3.5">
               <div>
                 <label className="crm-label">
-                  Mã phòng ban (Viết hoa) <span className="text-rose-500">*</span>
+                  Mã phòng ban <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="VD: TECH_LED hoặc DESIGN"
+                  placeholder="VD: TECH_LED"
                   value={deptCode}
                   onChange={(e) => setDeptCode(e.target.value.toUpperCase())}
-                  className="crm-input font-mono"
+                  className="crm-input"
                 />
               </div>
               <div>
@@ -1162,14 +1113,14 @@ export function AdminUsersView() {
                 <input
                   type="text"
                   required
-                  placeholder="VD: Phòng Kỹ Thuật & Lắp Đặt LED"
+                  placeholder="VD: Phòng Kỹ Thuật"
                   value={deptName}
                   onChange={(e) => setDeptName(e.target.value)}
                   className="crm-input"
                 />
               </div>
               <div>
-                <label className="crm-label">Chức năng / Mô tả nghiệp vụ</label>
+                <label className="crm-label">Mô tả nghiệp vụ</label>
                 <textarea
                   rows={3}
                   placeholder="Mô tả phạm vi công việc của phòng ban..."
@@ -1185,15 +1136,15 @@ export function AdminUsersView() {
                 isLoading={isCreatingDept}
                 leftIcon={<Plus className="w-4 h-4" />}
               >
-                Tạo phòng ban trong USER
+                Tạo phòng ban
               </Button>
             </form>
           </div>
 
           <div className="lg:col-span-2 crm-card p-5 space-y-4">
             <SectionHeader
-              title="Danh sách Phòng ban thuộc Tác nhân USER"
-              description="Mỗi nhân sự thuộc Tác nhân USER được phân vào 1 phòng ban và quản lý bởi Trưởng phòng / Trưởng ban"
+              title="Danh sách Phòng ban"
+              description="Các phòng ban nghiệp vụ hiện có trên hệ thống"
             />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {departments.map((d) => {
@@ -1219,12 +1170,12 @@ export function AdminUsersView() {
                         </StatusBadge>
                       </div>
                       <p className="text-xs text-slate-500 mt-1">
-                        {d.description || "Phòng ban nghiệp vụ thuộc Tác nhân USER"}
+                        {d.description || "Phòng ban nghiệp vụ"}
                       </p>
                     </div>
                     <div className="pt-2.5 border-t border-slate-200/70 flex items-center justify-between text-xs">
                       <span className="text-slate-600 font-medium">
-                        Nhân sự: <strong>{members.length}</strong> USER
+                        Nhân sự: <strong>{members.length}</strong>
                       </span>
                       <span className="text-slate-600">
                         Phụ trách:{" "}
@@ -1243,16 +1194,15 @@ export function AdminUsersView() {
 
       {activeSubTab === "promotions" && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          {/* Director Sign Form */}
           <div className="crm-card p-5 space-y-4">
             <SectionHeader
-              title="Bước 1: Giám đốc ký Thông báo chúc mừng"
-              description="Giám đốc ký quyết định bổ nhiệm/chúc mừng lên chức vụ. Sau khi ký, thông báo được gửi toàn hệ thống để Admin căn cứ cấp quyền."
+              title="Ký quyết định bổ nhiệm"
+              description="Giám đốc ký quyết định bổ nhiệm chức vụ quản lý cho nhân sự"
             />
             <form onSubmit={handleDirectorSignPromotion} className="space-y-3.5">
               <div>
                 <label className="crm-label">
-                  Nhân sự USER được bổ nhiệm <span className="text-rose-500">*</span>
+                  Nhân sự được bổ nhiệm <span className="text-rose-500">*</span>
                 </label>
                 <select
                   value={targetUserId}
@@ -1269,7 +1219,7 @@ export function AdminUsersView() {
                     .filter((u) => normalizeUserActor(u) === "USER")
                     .map((u) => (
                       <option key={u.id} value={u.id}>
-                        {u.name} — Phòng {u.department || u.role} (Hiện tại: {u.position || "Nhân viên"})
+                        {u.name} — Phòng {u.department || u.role} ({u.position || "Nhân viên"})
                       </option>
                     ))}
                 </select>
@@ -1291,7 +1241,7 @@ export function AdminUsersView() {
                   </select>
                 </div>
                 <div>
-                  <label className="crm-label">Chức vụ bổ nhiệm mới</label>
+                  <label className="crm-label">Chức vụ mới</label>
                   <select
                     value={newPosition}
                     onChange={(e) => setNewPosition(e.target.value)}
@@ -1307,12 +1257,12 @@ export function AdminUsersView() {
 
               <div>
                 <label className="crm-label">
-                  Tiêu đề Thông báo chúc mừng <span className="text-rose-500">*</span>
+                  Tiêu đề quyết định <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="VD: Chúc mừng bổ nhiệm Trưởng Phòng Thiết Kế LED"
+                  placeholder="VD: Quyết định bổ nhiệm Trưởng phòng Kinh doanh"
                   value={promoTitle}
                   onChange={(e) => setPromoTitle(e.target.value)}
                   className="crm-input"
@@ -1321,12 +1271,12 @@ export function AdminUsersView() {
 
               <div>
                 <label className="crm-label">
-                  Nội dung Giám đốc chúc mừng &amp; giao nhiệm vụ <span className="text-rose-500">*</span>
+                  Nội dung quyết định <span className="text-rose-500">*</span>
                 </label>
                 <textarea
                   rows={3}
                   required
-                  placeholder="Ban Giám Đốc chúc mừng nhân sự chính thức đảm nhận chức vụ mới..."
+                  placeholder="Nội dung bổ nhiệm và giao nhiệm vụ..."
                   value={promoContent}
                   onChange={(e) => setPromoContent(e.target.value)}
                   className="crm-textarea"
@@ -1340,23 +1290,22 @@ export function AdminUsersView() {
                 isLoading={isSigningPromo}
                 leftIcon={<FileSignature className="w-4 h-4" />}
               >
-                Giám đốc Ký &amp; Phát thông báo chúc mừng
+                Ký quyết định bổ nhiệm
               </Button>
             </form>
           </div>
 
-          {/* Admin Apply List */}
           <div className="lg:col-span-2 crm-card p-5 space-y-4">
             <SectionHeader
-              title="Bước 2: Admin căn cứ Thông báo của Giám đốc để Cấp quyền"
-              description="Chỉ những quyết định đã có chữ ký số của Giám đốc tại đây mới đủ điều kiện để Admin bấm nâng quyền chức vụ trên hệ thống."
+              title="Danh sách Quyết định bổ nhiệm"
+              description="Các quyết định đã ký và trạng thái áp dụng phân quyền"
             />
 
             {decisions.length === 0 ? (
               <EmptyState
                 icon={Award}
-                title="Chưa có thông báo bổ nhiệm nào"
-                description="Khi Giám đốc ký thông báo chúc mừng thăng chức ở khung bên trái, quyết định sẽ hiển thị tại đây để Admin cấp quyền."
+                title="Chưa có quyết định bổ nhiệm nào"
+                description="Khi Giám đốc ký quyết định bổ nhiệm, danh sách sẽ hiển thị tại đây."
               />
             ) : (
               <div className="space-y-3">
@@ -1373,11 +1322,11 @@ export function AdminUsersView() {
                         <span className="font-semibold text-sm text-slate-900">{d.title}</span>
                         {d.status === "APPLIED_BY_ADMIN" ? (
                           <StatusBadge tone="success" size="sm">
-                            Đã được Admin cấp quyền
+                            Đã áp dụng
                           </StatusBadge>
                         ) : (
                           <StatusBadge tone="warning" size="sm">
-                            Giám đốc đã ký — Chờ Admin cấp quyền
+                            Chờ Admin áp dụng
                           </StatusBadge>
                         )}
                       </div>
@@ -1387,8 +1336,7 @@ export function AdminUsersView() {
                           Nhân sự: <strong>{d.targetUser?.name || "Nhân viên"}</strong>
                         </span>
                         <span>
-                          Bổ nhiệm: <strong className="text-emerald-700">{d.newPosition}</strong> (Phòng{" "}
-                          <strong>{d.targetDepartment}</strong>)
+                          Chức vụ: <strong className="text-emerald-700">{d.newPosition}</strong> ({d.targetDepartment})
                         </span>
                         <span>
                           Người ký: <strong>{d.signedByName}</strong>
@@ -1405,7 +1353,7 @@ export function AdminUsersView() {
                           leftIcon={<CheckCircle2 className="w-4 h-4" />}
                           onClick={() => handleAdminApplyPromotion(d.id)}
                         >
-                          Admin Cấp quyền ngay
+                          Áp dụng quyền
                         </Button>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
@@ -1422,7 +1370,6 @@ export function AdminUsersView() {
         </div>
       )}
 
-      {/* Edit User Modal (State-Isolated Component) */}
       <EditUserModal
         editingUser={editingUser}
         departments={departments}

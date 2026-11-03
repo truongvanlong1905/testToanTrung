@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getCurrentUser, unauthorizedResponse } from "@/src/core/auth/auth";
 import { getRequestId, handleRouteError } from "@/src/core/http";
 import { createLogger } from "@/src/core/logger";
@@ -14,9 +14,8 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser(req);
     if (!user) return unauthorizedResponse();
 
-    const body = await req.json();
-    const result = await handleLeadAiAssist(user, body);
-    return NextResponse.json(result.payload, { status: result.status });
+    const body = await req.json().catch(() => ({}));
+    return await handleLeadAiAssist(user, body);
   } catch (error) {
     return handleRouteError(
       error,

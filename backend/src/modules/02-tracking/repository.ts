@@ -29,13 +29,22 @@ export async function queryTrackingOverviewData(includeFullLeadPhone: boolean) {
   return { events, syncJobs, siteStats, totalEvents };
 }
 
+export async function findTrackingEventByEventKey(eventKey: string) {
+  return prisma.trackingEvent.findUnique({
+    where: { eventKey },
+  });
+}
+
 export async function createTrackingEventRecord(data: {
+  eventKey?: string | null;
   websiteSource: string;
   source: string;
   medium: string;
   campaign: string | null;
   landingPage: string;
   device: string;
+  location?: string | null;
+  contactChannel?: string | null;
   utmParams: string;
   leadId: string | null;
   ipAddress: string | null;

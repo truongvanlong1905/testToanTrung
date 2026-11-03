@@ -2,12 +2,15 @@ import { z } from "zod";
 import { getTrackingAllowedOrigins } from "@/src/core/env";
 
 export const TrackingEventSchema = z.object({
+  eventKey: z.string().trim().min(1).max(255).optional(),
   websiteSource: z.string().trim().min(1).max(255).optional(),
   source: z.string().trim().min(1).max(100).optional(),
   medium: z.string().trim().min(1).max(100).optional(),
   campaign: z.string().trim().max(255).nullable().optional(),
   landingPage: z.string().trim().min(1).max(2048).optional(),
   device: z.string().trim().max(100).optional(),
+  location: z.string().trim().max(255).nullable().optional(),
+  contactChannel: z.string().trim().max(100).nullable().optional(),
   utmParams: z.union([z.record(z.string(), z.string()), z.string()]).optional(),
   leadId: z.string().optional(),
 });
@@ -53,7 +56,6 @@ export function getExternalConnectorStatus(service: ExternalConnectorService) {
     service: spec.service,
     label: spec.label,
     isConfigured,
-    missingEnvKeys,
     status: isConfigured ? "ERROR" : "NOT_CONFIGURED",
   };
 }

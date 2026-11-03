@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -14,9 +14,11 @@ import {
   Award,
   TrendingUp,
   Layers,
-  Clock,
+  Send,
   ChevronRight,
   RefreshCw,
+  PackageSearch,
+  Sparkles,
 } from "lucide-react";
 import { Lead, LeadStatus } from "@/src/modules/01-leads";
 import { CampaignItem } from "@/src/modules/03-ads-keywords";
@@ -29,11 +31,13 @@ import { getLeadStatusTone, StatusBadge } from "@/src/core/ui/badge";
 import { EmptyState } from "@/src/core/ui/feedback-states";
 import { SegmentedControl } from "@/src/core/ui/segmented-control";
 import { CardHeader } from "@/src/core/ui/card";
+import { canRoleAccessTab } from "@/src/core/auth/permissions";
 
 interface OverviewViewProps {
   leads: Lead[];
   stats?: OverviewStats;
   hasLoadedLeads?: boolean;
+  userRole?: string;
   /** Opens Lead Management, optionally pre-filtered by a pipeline status */
   onNavigateToLeads: (status?: string) => void;
   onNavigateToTab?: (tab: string) => void;
@@ -60,29 +64,47 @@ function formatShortDate(d: Date): string {
   return `${dd}/${mm}`;
 }
 
-function formatExactVnd(amount?: number): string | null {
-  if (!amount || !Number.isFinite(amount) || amount <= 0) return null;
-  return `${Math.round(amount).toLocaleString("vi-VN")} đ`;
-}
-
 type AnalyticsLead = Lead & { createdAtISO?: string };
+
+interface ProductInterestItem {
+  categoryId: string;
+  code?: string | null;
+  name: string;
+  group: string;
+  count: number;
+}
 
 interface LeadAnalytics {
   total: number;
   statusCounts: Record<string, number>;
   bySource: Array<{ source: string; count: number }>;
+  byChannel?: Array<{ channel: string; count: number }>;
   bySales: Array<{
+    salesPersonId?: string;
     name: string;
     initials: string;
     count: number;
+    totalLeads?: number;
+    newLeads?: number;
+    draftingQuote?: number;
+    sentQuote?: number;
+    unrespondedQuote?: number;
     won: number;
-    pipelineVnd?: number;
+    lost?: number;
+    winRatePercent?: number;
   }>;
   byDay: Array<{ date: string; count: number }>;
-  financials?: {
-    totalPipelineVnd: number;
-    quotingValueVnd: number;
-    wonRevenueVnd: number;
+  productInterest?: {
+    byProduct: ProductInterestItem[];
+    topProducts: ProductInterestItem[];
+    leastProducts: ProductInterestItem[];
+    byDemandType: Array<{ demandType: string; count: number }>;
+  };
+  quoteReport?: {
+    currentlyWaitingQuoteCount: number;
+    totalEverSentQuoteCount: number;
+    respondedCount: number;
+    unrespondedCount: number;
   };
   recentLeads?: AnalyticsLead[];
   actionQueue?: {
@@ -132,10 +154,6 @@ function getRangeParams(
   return {};
 }
 
-/**
- * Turn per-day counts into a continuous series. Short ranges stay daily (zero-filled so
- * quiet days are visible); long ranges collapse to months so bars stay readable.
- */
 function buildTimeSeries(
   byDay: Array<{ date: string; count: number }>,
   from?: string,
@@ -195,6 +213,7 @@ export function OverviewView({
   leads,
   stats,
   hasLoadedLeads = true,
+  userRole = "ADMIN",
   onNavigateToLeads,
   onNavigateToTab,
   onSelectLead,
@@ -206,13 +225,13 @@ export function OverviewView({
   const [refreshTick, setRefreshTick] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Real Campaigns & Reports read live from the web database (no cached / synthetic data)
+  const canAccessLeads = canRoleAccessTab(userRole, "leads");
+
   const [campaigns, setCampaigns] = useState<CampaignItem[]>([]);
   const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(true);
   const [recentReports, setRecentReports] = useState<ReportItem[]>([]);
   const [isLoadingReports, setIsLoadingReports] = useState(true);
 
-  // Real Database Aggregates for the selected period (independent of Lead tab filters)
   const [analytics, setAnalytics] = useState<LeadAnalytics | null>(null);
   const [analyticsFailed, setAnalyticsFailed] = useState(false);
 
@@ -221,10 +240,8 @@ export function OverviewView({
     [timeRange, customFrom, customTo]
   );
 
-  // Create a lightweight signature from `leads` so creating/editing/deleting a Lead on the web
-  // automatically refreshes Dashboard figures immediately.
   const leadsMutationKey = useMemo(
-    () => leads.map((l) => `${l.id}:${l.status}:${l.estimatedValue}`).join("|"),
+    () => leads.map((l) => `${l.id}:${l.status}:${l.product}`).join("|"),
     [leads]
   );
 
@@ -307,7 +324,6 @@ export function OverviewView({
     });
   }, [leads, timeRange, customFrom, customTo]);
 
-  // Always prefer direct database aggregates (unfiltered by Lead Management tab).
   const dbStatus = analytics?.statusCounts;
   const useDb = Boolean(analytics);
   const countOf = (status: string) => dbStatus?.[status] ?? 0;
@@ -329,11 +345,9 @@ export function OverviewView({
   const sentQuoteLeads = useDb
     ? countOf("Đã gửi báo giá")
     : filteredLeads.filter((l) => l.status === "Đã gửi báo giá").length;
-  const quotingLeads = useDb
-    ? draftingLeads + sentQuoteLeads
-    : useServerAllStats
-      ? stats!.quotingLeads
-      : draftingLeads + sentQuoteLeads;
+  const unrespondedQuoteCount =
+    analytics?.quoteReport?.unrespondedCount ??
+    filteredLeads.filter((l) => l.status === "Đã gửi báo giá" && !l.customerResponded).length;
   const wonLeads = useDb
     ? countOf("Chốt thành công")
     : useServerAllStats
@@ -347,10 +361,6 @@ export function OverviewView({
 
   const hasRealLeadData = (useDb || hasLoadedLeads) && totalLeads > 0;
   const winRate = totalLeads > 0 ? Math.round((wonLeads / totalLeads) * 100) : 0;
-
-  const totalPipelineLabel = formatExactVnd(analytics?.financials?.totalPipelineVnd);
-  const quotingValueLabel = formatExactVnd(analytics?.financials?.quotingValueVnd);
-  const wonRevenueLabel = formatExactVnd(analytics?.financials?.wonRevenueVnd);
 
   // 1. Lead theo thời gian
   const leadsByTime = useMemo<TimePoint[]>(() => {
@@ -392,7 +402,7 @@ export function OverviewView({
       .sort((a, b) => b.count - a.count);
   }, [analytics, filteredLeads]);
 
-  // 3. Lead theo trạng thái (exact real counts — zero synthetic splitting)
+  // 3. Lead theo trạng thái (5 giai đoạn xử lý hồ sơ)
   const leadsByStatus: Array<{
     status: LeadStatus;
     count: number;
@@ -408,13 +418,13 @@ export function OverviewView({
     [newLeads, draftingLeads, sentQuoteLeads, wonLeads, lostLeads]
   );
 
-  // 4. Sales performance (real lead, won & VND pipeline counts)
+  // 4. Sales performance (không tính doanh thu hay tiền)
   const salesPerformance = useMemo(() => {
     if (analytics) return analytics.bySales;
 
     const salesMap = new Map<
       string,
-      { name: string; initials: string; count: number; won: number; pipelineVnd?: number }
+      { name: string; initials: string; count: number; won: number }
     >();
 
     filteredLeads.forEach((l) => {
@@ -438,14 +448,13 @@ export function OverviewView({
           initials: s.initials,
           count: s.count,
           won: 0,
-          pipelineVnd: undefined,
         }));
     }
 
     return Array.from(salesMap.values()).sort((a, b) => b.count - a.count);
   }, [analytics, filteredLeads, stats, useServerAllStats]);
 
-  // 5. Activity Feed — built directly from real DB `recentLeads` & real `recentReports` sorted by timestamp
+  // 5. Activity Feed
   const activityFeed = useMemo(() => {
     const items: Array<{
       id: string;
@@ -499,7 +508,7 @@ export function OverviewView({
     return items.sort((a, b) => b.ts - a.ts).slice(0, 7);
   }, [analytics, filteredLeads, recentReports, range.from, range.to]);
 
-  // 6. Action queue — real leads waiting on the team directly from database (oldest waiting first)
+  // 6. Action queue
   const actionQueue = useMemo(() => {
     if (analytics?.actionQueue) {
       return {
@@ -522,11 +531,11 @@ export function OverviewView({
     };
     const contact = filteredLeads
       .filter((l) => l.status === "Vừa nhận thông tin")
-      .map((l) => toItem(l, "Chờ liên hệ"));
+      .map((l) => toItem(l, "Chờ liên hệ tư vấn"));
     const followUp = filteredLeads
       .filter((l) => l.status === "Đang soạn báo giá" || l.status === "Đã gửi báo giá")
       .map((l) =>
-        toItem(l, l.status === "Đang soạn báo giá" ? "Đang soạn báo giá" : "Chờ phản hồi báo giá")
+        toItem(l, l.status === "Đang soạn báo giá" ? "Đang soạn báo giá" : "Đã gửi báo giá — chờ phản hồi")
       );
     return {
       contactCount: contact.length,
@@ -546,12 +555,20 @@ export function OverviewView({
     return "Toàn thời gian";
   };
 
+  const productInterest = analytics?.productInterest;
+  const topProducts = productInterest?.topProducts || [];
+  const leastProducts = productInterest?.leastProducts || [];
+  const sortedProducts = useMemo(() => {
+    if (!productInterest?.byProduct) return [];
+    return [...productInterest.byProduct].sort((a, b) => b.count - a.count);
+  }, [productInterest]);
+
   return (
     <div className="space-y-6">
       {/* Top Area */}
       <PageHeader
         title="Dashboard"
-        description="Số liệu đồng bộ trực tiếp 100% từ dữ liệu thực tế hiện có trên Web"
+        description="Số liệu đồng bộ trực tiếp 100% từ dữ liệu thực tế hiện có trên hệ thống"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <SegmentedControl
@@ -579,58 +596,61 @@ export function OverviewView({
               Làm mới
             </Button>
 
-            <Button
-              variant="secondary"
-              size="md"
-              isLoading={isExportingExcel}
-              disabled={!hasRealLeadData}
-              leftIcon={<FileSpreadsheet className="w-4 h-4 text-emerald-600" />}
-              onClick={async () => {
-                try {
-                  setIsExportingExcel(true);
-                  // Fetch unfiltered real web leads directly from API so Lead tab filters never truncate export
-                  let exportRows: Lead[] = filteredLeads;
-                  try {
-                    const res = await fetch("/api/leads?pageSize=100", { cache: "no-store" });
-                    const json = await res.json();
-                    if (res.ok && json?.success && Array.isArray(json.data?.leads)) {
-                      const allWebLeads: Lead[] = json.data.leads;
-                      exportRows = allWebLeads.filter((lead) => {
-                        if (!range.from && !range.to) return true;
-                        const parsed = parseLeadDate(lead.createdAt);
-                        if (!parsed) return true;
-                        if (range.from && parsed < new Date(`${range.from}T00:00:00`)) return false;
-                        if (range.to && parsed > new Date(`${range.to}T23:59:59`)) return false;
-                        return true;
+            {canAccessLeads && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="md"
+                  isLoading={isExportingExcel}
+                  disabled={!hasRealLeadData}
+                  leftIcon={<FileSpreadsheet className="w-4 h-4 text-emerald-600" />}
+                  onClick={async () => {
+                    try {
+                      setIsExportingExcel(true);
+                      let exportRows: Lead[] = filteredLeads;
+                      try {
+                        const res = await fetch("/api/leads?pageSize=200", { cache: "no-store" });
+                        const json = await res.json();
+                        if (res.ok && json?.success && Array.isArray(json.data?.leads)) {
+                          const allWebLeads: Lead[] = json.data.leads;
+                          exportRows = allWebLeads.filter((lead) => {
+                            if (!range.from && !range.to) return true;
+                            const parsed = parseLeadDate(lead.createdAt);
+                            if (!parsed) return true;
+                            if (range.from && parsed < new Date(`${range.from}T00:00:00`)) return false;
+                            if (range.to && parsed > new Date(`${range.to}T23:59:59`)) return false;
+                            return true;
+                          });
+                        }
+                      } catch {
+                        // fallback to filteredLeads if offline
+                      }
+
+                      const { exportLeadsWorkbook } = await import("@/src/core/utils/excel-export");
+                      await exportLeadsWorkbook({
+                        leads: exportRows,
+                        stats: useServerAllStats ? stats : undefined,
+                        filterLabel: `Dashboard (${getRangeLabel()})`,
+                        exportedBy: "Ban Điều Hành Toàn Trung",
                       });
+                    } finally {
+                      setIsExportingExcel(false);
                     }
-                  } catch {
-                    // fallback to filteredLeads if offline
-                  }
+                  }}
+                >
+                  Xuất Excel
+                </Button>
 
-                  const { exportLeadsWorkbook } = await import("@/src/core/utils/excel-export");
-                  await exportLeadsWorkbook({
-                    leads: exportRows,
-                    stats: useServerAllStats ? stats : undefined,
-                    filterLabel: `Dashboard (${getRangeLabel()})`,
-                    exportedBy: "Ban Điều Hành Toàn Trung",
-                  });
-                } finally {
-                  setIsExportingExcel(false);
-                }
-              }}
-            >
-              Export
-            </Button>
-
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => onNavigateToLeads("all")}
-              rightIcon={<ArrowRight className="w-4 h-4" />}
-            >
-              Quản lý Lead
-            </Button>
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => onNavigateToLeads("all")}
+                  rightIcon={<ArrowRight className="w-4 h-4" />}
+                >
+                  Quản lý Lead
+                </Button>
+              </>
+            )}
           </div>
         }
       />
@@ -678,7 +698,7 @@ export function OverviewView({
         </div>
       )}
 
-      {/* KPI Cards — 100% real DB counts & VND pipeline figures */}
+      {/* KPI Cards — Không hiển thị thẻ "Đang báo giá" hay tiền tệ (AC-15) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard
           label="Tổng Lead"
@@ -688,16 +708,14 @@ export function OverviewView({
           iconTone="blue"
           note={
             hasRealLeadData
-              ? totalPipelineLabel
-                ? `Tổng dự toán thực tế: ${totalPipelineLabel}`
-                : `Kỳ lọc: ${getRangeLabel()}`
+              ? `Kỳ lọc: ${getRangeLabel()}`
               : "Chưa ghi nhận hồ sơ khách hàng tiềm năng"
           }
-          onClick={hasRealLeadData ? () => onNavigateToLeads("all") : undefined}
-          actionHint="Mở danh sách"
+          onClick={hasRealLeadData && canAccessLeads ? () => onNavigateToLeads("all") : undefined}
+          actionHint={canAccessLeads ? "Mở danh sách" : undefined}
         />
         <StatCard
-          label="Lead mới"
+          label="Lead mới tiếp nhận"
           value={hasRealLeadData ? newLeads.toLocaleString("vi-VN") : null}
           isEmpty={!hasRealLeadData}
           icon={UserPlus2}
@@ -705,37 +723,40 @@ export function OverviewView({
           progress={totalLeads > 0 ? Math.round((newLeads / totalLeads) * 100) : undefined}
           note={
             hasRealLeadData
-              ? "Đang ở bước Vừa nhận thông tin"
+              ? "Đang ở trạng thái Vừa nhận thông tin"
               : "Chưa phát sinh Lead mới trong kỳ"
           }
-          onClick={hasRealLeadData ? () => onNavigateToLeads("Vừa nhận thông tin") : undefined}
-          actionHint="Xem"
+          onClick={
+            hasRealLeadData && canAccessLeads
+              ? () => onNavigateToLeads("Vừa nhận thông tin")
+              : undefined
+          }
+          actionHint={canAccessLeads ? "Xem" : undefined}
         />
         <StatCard
-          label="Đang báo giá"
-          value={hasRealLeadData ? quotingLeads.toLocaleString("vi-VN") : null}
+          label="Đã gửi báo giá"
+          value={hasRealLeadData ? sentQuoteLeads.toLocaleString("vi-VN") : null}
           isEmpty={!hasRealLeadData}
-          icon={Clock}
+          icon={Send}
           iconTone="amber"
-          progress={totalLeads > 0 ? Math.round((quotingLeads / totalLeads) * 100) : undefined}
-          badgeText={hasRealLeadData && quotingLeads > 0 ? "Cần bám sát" : undefined}
+          progress={totalLeads > 0 ? Math.round((sentQuoteLeads / totalLeads) * 100) : undefined}
+          badgeText={
+            hasRealLeadData && unrespondedQuoteCount > 0
+              ? `${unrespondedQuoteCount} chờ phản hồi`
+              : undefined
+          }
           badgeTone="warning"
           note={
             hasRealLeadData
-              ? quotingValueLabel
-                ? `${draftingLeads} soạn · ${sentQuoteLeads} đã gửi (${quotingValueLabel})`
-                : `${draftingLeads} đang soạn · ${sentQuoteLeads} đã gửi`
-              : "Chưa có hồ sơ đang báo giá"
+              ? `${unrespondedQuoteCount} khách chưa phản hồi · ${draftingLeads} đang soạn`
+              : "Chưa có hồ sơ đã gửi báo giá"
           }
           onClick={
-            hasRealLeadData
-              ? () =>
-                  onNavigateToLeads(
-                    sentQuoteLeads > 0 ? "Đã gửi báo giá" : "Đang soạn báo giá"
-                  )
+            hasRealLeadData && canAccessLeads
+              ? () => onNavigateToLeads("Đã gửi báo giá")
               : undefined
           }
-          actionHint="Xem báo giá"
+          actionHint={canAccessLeads ? "Xem danh sách" : undefined}
         />
         <StatCard
           label="Chốt thành công"
@@ -748,13 +769,15 @@ export function OverviewView({
           badgeTone="success"
           note={
             hasRealLeadData
-              ? wonRevenueLabel
-                ? `Doanh số chốt: ${wonRevenueLabel}`
-                : `${lostLeads} hồ sơ thất bại / tạm ngưng`
-              : "Chưa có dữ liệu chuyển đổi hợp đồng"
+              ? `${lostLeads} hồ sơ thất bại trong kỳ`
+              : "Chưa có dữ liệu chốt thành công"
           }
-          onClick={hasRealLeadData ? () => onNavigateToLeads("Chốt thành công") : undefined}
-          actionHint="Xem"
+          onClick={
+            hasRealLeadData && canAccessLeads
+              ? () => onNavigateToLeads("Chốt thành công")
+              : undefined
+          }
+          actionHint={canAccessLeads ? "Xem" : undefined}
         />
       </div>
 
@@ -766,15 +789,15 @@ export function OverviewView({
             title="Lead theo thời gian"
             description={
               leadsByTime.length > 31 || leadsByTime.some((p) => p.label.length > 5)
-                ? "Số Lead thực tế tiếp nhận theo tháng trên Web"
-                : "Số Lead thực tế tiếp nhận theo ngày trên Web"
+                ? "Số Lead thực tế tiếp nhận theo tháng"
+                : "Số Lead thực tế tiếp nhận theo ngày"
             }
             count={hasRealLeadData ? `${totalLeads.toLocaleString("vi-VN")} Lead` : undefined}
           />
 
           {analyticsFailed && !analytics && (
             <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              Không tải được số liệu tổng hợp từ máy chủ. Biểu đồ đang chỉ tính trên các Lead đã tải.
+              Không tải được số liệu tổng hợp từ máy chủ. Biểu đồ đang tính trên danh sách hiện tại.
             </p>
           )}
 
@@ -827,7 +850,7 @@ export function OverviewView({
                 compact
                 icon={TrendingUp}
                 title="Chưa có dữ liệu Lead theo thời gian"
-                description="Biểu đồ xu hướng sẽ tự động hiển thị ngay khi bạn thêm khách hàng tiềm năng trên Web."
+                description="Biểu đồ xu hướng sẽ tự động hiển thị ngay khi có khách hàng tiềm năng."
               />
             </div>
           )}
@@ -837,7 +860,7 @@ export function OverviewView({
         <div className="lg:col-span-5 crm-card p-5 flex flex-col justify-between">
           <SectionHeader
             title="Lead theo trạng thái"
-            description="Phân bổ thực tế 5 giai đoạn xử lý hồ sơ dự án"
+            description="Phân bổ thực tế 5 giai đoạn xử lý hồ sơ"
           />
 
           {hasRealLeadData ? (
@@ -848,9 +871,12 @@ export function OverviewView({
                   <button
                     type="button"
                     key={stage.status}
-                    onClick={() => onNavigateToLeads(stage.status)}
-                    title={`Mở danh sách Lead "${stage.status}"`}
-                    className="w-full text-left space-y-1.5 rounded-lg px-2 py-1.5 -mx-2 hover:bg-slate-50 transition-colors cursor-pointer group"
+                    onClick={() => canAccessLeads && onNavigateToLeads(stage.status)}
+                    title={canAccessLeads ? `Mở danh sách Lead "${stage.status}"` : stage.status}
+                    className={cn(
+                      "w-full text-left space-y-1.5 rounded-lg px-2 py-1.5 -mx-2 transition-colors group",
+                      canAccessLeads ? "hover:bg-slate-50 cursor-pointer" : "cursor-default"
+                    )}
                   >
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-medium text-slate-700 group-hover:text-slate-900">
@@ -859,7 +885,9 @@ export function OverviewView({
                       <span className="text-slate-500 kpi-number inline-flex items-center gap-1">
                         <strong className="font-semibold text-slate-900">{stage.count}</strong>
                         <span className="w-9 text-right">{pct}%</span>
-                        <ChevronRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 transition-colors" />
+                        {canAccessLeads && (
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 transition-colors" />
+                        )}
                       </span>
                     </div>
                     <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
@@ -878,11 +906,142 @@ export function OverviewView({
                 compact
                 icon={Layers}
                 title="Chưa có dữ liệu trạng thái"
-                description="Tỷ trọng 5 bước tiến độ sẽ hiển thị khi có hồ sơ Lead thật trên Web."
+                description="Tỷ trọng 5 bước tiến độ sẽ hiển thị khi có hồ sơ Lead."
               />
             </div>
           )}
         </div>
+      </div>
+
+      {/* Widget: Sản phẩm được quan tâm (AC-21) */}
+      <div className="crm-card p-5 space-y-4">
+        <SectionHeader
+          title="Sản phẩm được quan tâm"
+          description={`Thống kê danh mục sản phẩm được khách hàng hỏi nhiều nhất và ít nhất (${getRangeLabel()})`}
+          count={
+            sortedProducts.length > 0
+              ? `${sortedProducts.length} sản phẩm chuẩn`
+              : undefined
+          }
+          action={
+            onNavigateToTab ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => onNavigateToTab("reports")}
+              >
+                Xem báo cáo chi tiết
+              </Button>
+            ) : undefined
+          }
+        />
+
+        {sortedProducts.length > 0 ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Sản phẩm được hỏi nhiều nhất */}
+              <div className="p-4 rounded-xl border border-emerald-200/80 bg-emerald-50/40 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                    Sản phẩm được hỏi nhiều nhất
+                    {topProducts.length > 1 ? ` (Đồng hạng ${topProducts.length} SP)` : ""}
+                  </span>
+                  <StatusBadge tone="success" size="sm" dot={false}>
+                    {topProducts[0]?.count ?? 0} lượt hỏi
+                  </StatusBadge>
+                </div>
+                {topProducts.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {topProducts.map((p) => (
+                      <span
+                        key={p.categoryId}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-emerald-200 text-xs font-medium text-slate-800"
+                      >
+                        <span>{p.name}</span>
+                        <strong className="text-emerald-700 tabular-nums">({p.count})</strong>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Chưa có lượt hỏi sản phẩm nào trong khoảng thời gian đã chọn.
+                  </p>
+                )}
+              </div>
+
+              {/* Sản phẩm ít được hỏi nhất (bao gồm cả 0 lượt) */}
+              <div className="p-4 rounded-xl border border-amber-200/80 bg-amber-50/40 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-900">
+                    <PackageSearch className="w-3.5 h-3.5 text-amber-600" />
+                    Sản phẩm ít được hỏi nhất
+                    {leastProducts.length > 1 ? ` (Đồng hạng ${leastProducts.length} SP)` : ""}
+                  </span>
+                  <StatusBadge tone="warning" size="sm" dot={false}>
+                    {leastProducts[0]?.count ?? 0} lượt hỏi
+                  </StatusBadge>
+                </div>
+                {leastProducts.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {leastProducts.slice(0, 8).map((p) => (
+                      <span
+                        key={p.categoryId}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-amber-200 text-xs font-medium text-slate-700"
+                      >
+                        <span>{p.name}</span>
+                        <strong className="text-amber-700 tabular-nums">({p.count})</strong>
+                      </span>
+                    ))}
+                    {leastProducts.length > 8 && (
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/80 border border-amber-200 text-xs text-amber-800">
+                        +{leastProducts.length - 8} sản phẩm khác ({leastProducts[0]?.count ?? 0} lượt)
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">Chưa có dữ liệu danh mục sản phẩm.</p>
+                )}
+              </div>
+            </div>
+
+            {/* Top 6 sản phẩm phổ biến */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {sortedProducts.slice(0, 6).map((item, idx) => {
+                const maxCount = Math.max(1, sortedProducts[0]?.count || 1);
+                const pct = item.count > 0 ? Math.max(6, Math.round((item.count / maxCount) * 100)) : 0;
+                return (
+                  <div
+                    key={item.categoryId}
+                    className="p-3 rounded-lg border border-slate-200/80 bg-slate-50/40 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="font-medium text-slate-800 truncate">
+                        #{idx + 1}. {item.name}
+                      </span>
+                      <span className="font-semibold text-blue-700 tabular-nums shrink-0">
+                        {item.count} Lead
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-200/70 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-600 rounded-full"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <EmptyState
+            compact
+            icon={PackageSearch}
+            title="Đang tải thống kê sản phẩm quan tâm"
+            description="Dữ liệu phân tích nhu cầu theo 21 danh mục sản phẩm chuẩn sẽ hiển thị tại đây."
+          />
+        )}
       </div>
 
       {/* Analytics Area Row 2: Lead theo nguồn, Campaign Performance, Sales Performance */}
@@ -927,14 +1086,14 @@ export function OverviewView({
           )}
         </div>
 
-        {/* Campaign Performance (100% Real /api/campaigns created on Web) */}
+        {/* Campaign Performance */}
         <div className="crm-card p-5">
           <SectionHeader
             title="Chiến dịch Marketing"
-            description="Chiến dịch thực tế đang vận hành trên Web"
+            description="Chiến dịch thực tế đang vận hành"
             count={campaigns.length > 0 ? `${campaigns.length} chiến dịch` : undefined}
             action={
-              onNavigateToTab ? (
+              onNavigateToTab && canRoleAccessTab(userRole, "ads") ? (
                 <button
                   type="button"
                   onClick={() => onNavigateToTab("ads")}
@@ -955,9 +1114,9 @@ export function OverviewView({
           ) : campaigns.length > 0 ? (
             <div className="mt-4 space-y-3">
               {campaigns.slice(0, 4).map((camp) => {
-                const spendRatio =
-                  camp.budget > 0 ? Math.min(100, Math.round((camp.spent / camp.budget) * 100)) : 0;
                 const isActive = camp.status?.toUpperCase() === "ACTIVE";
+                const convCount = camp.platformConversions ?? camp.conversions ?? 0;
+                const crmLeadsCount = camp.crmLeadsFromAds ?? 0;
                 return (
                   <div
                     key={camp.id}
@@ -972,23 +1131,15 @@ export function OverviewView({
                         size="sm"
                         dot={false}
                       >
-                        {isActive ? "Active" : camp.status}
+                        {isActive ? "Đang chạy" : "Tạm dừng"}
                       </StatusBadge>
                     </div>
                     <div className="flex items-center justify-between text-[11.5px] text-slate-500 kpi-number">
+                      <span>{camp.platform}</span>
                       <span>
-                        Chi: {camp.spent.toLocaleString("vi-VN")} đ /{" "}
-                        {camp.budget.toLocaleString("vi-VN")} đ
+                        Chuyển đổi Ads: <strong className="text-slate-800">{convCount}</strong> ·{" "}
+                        Lead CRM: <strong className="text-blue-700">{crmLeadsCount}</strong>
                       </span>
-                      <span>
-                        {camp.platform} · <strong className="text-slate-800">{spendRatio}%</strong>
-                      </span>
-                    </div>
-                    <div className="h-1.5 w-full bg-slate-200/70 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-blue-600 rounded-full"
-                        style={{ width: `${spendRatio === 0 ? 0 : Math.max(4, spendRatio)}%` }}
-                      />
                     </div>
                   </div>
                 );
@@ -999,19 +1150,8 @@ export function OverviewView({
               <EmptyState
                 compact
                 icon={Megaphone}
-                title="Chưa tạo chiến dịch quảng cáo trên Web"
-                description="Hệ thống không tạo số liệu giả. Khi bạn thêm chiến dịch tại mục Quảng cáo & Từ khóa, hiệu suất thật sẽ hiển thị tại đây."
-                action={
-                  onNavigateToTab ? (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => onNavigateToTab("ads")}
-                    >
-                      Mở Quảng cáo &amp; Từ khóa
-                    </Button>
-                  ) : undefined
-                }
+                title="Chưa tạo chiến dịch quảng cáo"
+                description="Khi thêm chiến dịch tại mục Quảng cáo & Từ khóa, hiệu suất thật sẽ hiển thị tại đây."
               />
             </div>
           )}
@@ -1028,7 +1168,8 @@ export function OverviewView({
           {salesPerformance.length > 0 ? (
             <div className="mt-4 space-y-2.5">
               {salesPerformance.slice(0, 5).map((person) => {
-                const personPipeline = formatExactVnd(person.pipelineVnd);
+                const pctWon =
+                  person.count > 0 ? Math.round((person.won / person.count) * 100) : 0;
                 return (
                   <div
                     key={person.name}
@@ -1043,8 +1184,9 @@ export function OverviewView({
                           {person.name}
                         </p>
                         <p className="text-[11px] text-slate-500 truncate">
-                          {person.won > 0 ? `Đã chốt ${person.won} dự án` : "Đang chăm sóc cơ hội"}
-                          {personPipeline ? ` · ${personPipeline}` : ""}
+                          {person.won > 0
+                            ? `Đã chốt ${person.won} khách (${pctWon}%)`
+                            : "Đang chăm sóc cơ hội"}
                         </p>
                       </div>
                     </div>
@@ -1062,7 +1204,7 @@ export function OverviewView({
                 compact
                 icon={Award}
                 title="Chưa có dữ liệu phân công Sales"
-                description="Thống kê bàn giao và chốt hợp đồng sẽ hiển thị khi có Lead được phân công trên Web."
+                description="Thống kê bàn giao và chốt hợp đồng sẽ hiển thị khi có Lead được phân công."
               />
             </div>
           )}
@@ -1076,9 +1218,11 @@ export function OverviewView({
             title="Hoạt động thực tế gần đây"
             description="Lead mới nhất và báo cáo thực tế vừa gửi trên hệ thống"
             actions={
-              <Button variant="ghost" size="sm" onClick={() => onNavigateToLeads("all")}>
-                Xem tất cả Lead
-              </Button>
+              canAccessLeads ? (
+                <Button variant="ghost" size="sm" onClick={() => onNavigateToLeads("all")}>
+                  Xem tất cả Lead
+                </Button>
+              ) : undefined
             }
           />
 
@@ -1122,7 +1266,7 @@ export function OverviewView({
                     <button
                       type="button"
                       onClick={() => {
-                        if (act.leadRef) {
+                        if (act.leadRef && canAccessLeads) {
                           onSelectLead(act.leadRef);
                         } else if (onNavigateToTab) {
                           onNavigateToTab("reports");
@@ -1169,13 +1313,8 @@ export function OverviewView({
             <EmptyState
               compact
               icon={ClipboardList}
-              title="Chưa có hoạt động nào trên Web"
-              description="Khi bạn tạo Lead mới hoặc gửi báo cáo phòng ban, dữ liệu thực tế sẽ tự động xuất hiện tại đây."
-              action={
-                <Button variant="primary" size="sm" onClick={() => onNavigateToLeads("all")}>
-                  Chuyển tới Quản lý Lead
-                </Button>
-              }
+              title="Chưa có hoạt động nào trên hệ thống"
+              description="Khi tạo Lead mới hoặc gửi báo cáo phòng ban, dữ liệu thực tế sẽ tự động xuất hiện tại đây."
             />
           )}
         </div>
@@ -1184,7 +1323,7 @@ export function OverviewView({
         <div className="lg:col-span-5 crm-card overflow-hidden flex flex-col">
           <CardHeader
             title="Cần xử lý"
-            description="Lead thực tế đang chờ liên hệ hoặc theo dõi báo giá"
+            description="Lead thực tế đang chờ liên hệ hoặc theo dõi phản hồi báo giá"
             count={actionQueue.contactCount + actionQueue.followUpCount}
           />
 
@@ -1193,7 +1332,7 @@ export function OverviewView({
               <div className="grid grid-cols-2 gap-px bg-slate-100 border-b border-slate-200/80">
                 <button
                   type="button"
-                  onClick={() => onNavigateToLeads("Vừa nhận thông tin")}
+                  onClick={() => canAccessLeads && onNavigateToLeads("Vừa nhận thông tin")}
                   className="bg-white px-5 py-3 text-left hover:bg-slate-50 transition-colors cursor-pointer"
                 >
                   <p className="text-overline">Chờ liên hệ</p>
@@ -1204,13 +1343,14 @@ export function OverviewView({
                 <button
                   type="button"
                   onClick={() =>
+                    canAccessLeads &&
                     onNavigateToLeads(
                       sentQuoteLeads > 0 ? "Đã gửi báo giá" : "Đang soạn báo giá"
                     )
                   }
                   className="bg-white px-5 py-3 text-left hover:bg-slate-50 transition-colors cursor-pointer"
                 >
-                  <p className="text-overline">Đang / Đã gửi báo giá</p>
+                  <p className="text-overline">Soạn / Đã gửi báo giá</p>
                   <p className="mt-1 text-xl font-semibold text-slate-900 tabular-nums">
                     {actionQueue.followUpCount}
                   </p>
@@ -1221,17 +1361,15 @@ export function OverviewView({
                   <li key={lead.id}>
                     <button
                       type="button"
-                      onClick={() => onSelectLead(lead)}
+                      onClick={() => canAccessLeads && onSelectLead(lead)}
                       className="w-full text-left px-5 py-3 flex items-center justify-between gap-3 hover:bg-slate-50/80 transition-colors cursor-pointer group"
                     >
                       <div className="min-w-0">
                         <p className="text-[13px] font-medium text-slate-900 truncate group-hover:text-blue-600 transition-colors">
                           {lead.customerName}
-                          {lead.estimatedValue && lead.estimatedValue !== "Đang khảo sát" ? (
-                            <span className="ml-1.5 text-[11.5px] font-semibold text-blue-600">
-                              · {lead.estimatedValue}
-                            </span>
-                          ) : null}
+                          <span className="ml-1.5 text-[11.5px] font-normal text-slate-500">
+                            · {lead.product}
+                          </span>
                         </p>
                         <p className="text-xs text-slate-500 truncate mt-0.5">
                           {reason} · {lead.salesPerson.name}

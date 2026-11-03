@@ -38,6 +38,7 @@ model User {
   auditLogs           AuditLog[]
   departmentReports   DepartmentReport[]
   departmentReportReads DepartmentReportRead[]
+  notificationReads   NotificationRead[]
   promotionsReceived  PromotionDecision[] @relation("PromotionTargetUser")
   promotionsSigned    PromotionDecision[] @relation("PromotionSignedDirector")
   promotionsApplied   PromotionDecision[] @relation("PromotionAppliedAdmin")
@@ -87,30 +88,44 @@ model PromotionDecision {
 }
 
 model ProductCategory {
-  id          String   @id @default(cuid())
-  code        String   @unique
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String   @unique
+  description     String?
+  group           String   @default("LED_SCREEN") // LED_SCREEN, ELECTRONIC_BOARD, OTHER
+  sortOrder       Int      @default(100)
+  allowCustomText Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   leads Lead[]
+
+  @@index([group])
+  @@index([sortOrder])
 }
 
 model Lead {
   id                  String   @id @default(cuid())
   code                String   @unique // Ví dụ: TT-LED-2401
   customerName        String
-  companyName         String
+  companyName         String   @default("")
   phone               String
+  normalizedPhone     String?
   email               String?
   installationAddress String?
-  location            String   @default("TP. Hồ Chí Minh")
-  product             String
+  location            String   @default("")
+  product             String   @default("Chưa xác định")
+  productCustomText   String?
+  demandType          String?  // Hỏi sửa chữa, Không cung cấp thông tin, Hỏi sản phẩm đặc biệt, Hỏi thuê, Không đúng nhu cầu
   categoryId          String
   source              String   @default("Hotline") // Hotline, Form, Email, Facebook Ads, Google Ads, Website, Giới thiệu, Triển lãm
+  contactChannel      String?  // Hotline, Điền form, Email, Zalo, Facebook...
   status              String   @default("Vừa nhận thông tin") // Vừa nhận thông tin, Đang soạn báo giá, Đã gửi báo giá, Chốt thành công, Thất bại
   failureReason       String?  // Bắt buộc nếu status = Thất bại
+  quoteSentAt         DateTime?
+  customerRespondedAt DateTime?
+  customerResponseNote String?
   estimatedValue      String?  @default("Đang khảo sát")
   notes               String?
 
@@ -146,11 +161,15 @@ model Lead {
   quotes              LeadQuote[]
 
   @@index([phone])
+  @@index([normalizedPhone])
   @@index([email])
   @@index([customerName])
   @@index([companyName])
   @@index([status])
   @@index([source])
+  @@index([demandType])
+  @@index([quoteSentAt])
+  @@index([customerRespondedAt])
   @@index([priorityTier])
   @@index([nextFollowUpAt])
   @@index([directorApprovalStatus])
@@ -211,20 +230,22 @@ model LeadAttachment {
 }
 
 model TrackingEvent {
-  id            String   @id @default(cuid())
-  leadId        String?
-  websiteSource String   @default("toantrungtelecom.com")
-  source        String   @default("google")
-  medium        String   @default("cpc")
-  campaign      String?  @default("LED_Outdoor_2026")
-  landingPage   String   @default("/san-pham/man-hinh-led-p3-outdoor")
-  utmParams     String?  // JSON string
-  device        String?  @default("Desktop")
-  ipAddress     String?
-  location      String?  @default("TP. Hồ Chí Minh")
-  createdAt     DateTime @default(now())
+  id             String   @id @default(cuid())
+  eventKey       String?  @unique
+  leadId         String?
+  websiteSource  String   @default("")
+  source         String   @default("")
+  medium         String   @default("")
+  contactChannel String?
+  campaign       String?
+  landingPage    String   @default("")
+  utmParams      String?  // JSON string
+  device         String?
+  ipAddress      String?
+  location       String?
+  createdAt      DateTime @default(now())
 
-  lead          Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  lead           Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
   @@index([websiteSource])
   @@index([source])
@@ -401,4 +422,16 @@ model LeadQuote {
 
   @@index([leadId])
   @@index([createdAt])
+}
+
+model NotificationRead {
+  id              String   @id @default(cuid())
+  notificationKey String
+  userId          String
+  readAt          DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationKey, userId])
+  @@index([userId])
 }

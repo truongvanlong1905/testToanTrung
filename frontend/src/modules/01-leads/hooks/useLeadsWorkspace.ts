@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { AiLeadDraft } from "../components/AiQuickLeadBar";
 import {
   assignLeadSalesApi,
   deleteLeadById,
@@ -17,14 +16,15 @@ import {
 
 export interface UseLeadsWorkspaceOptions {
   currentUserName?: string;
+  enabled?: boolean;
   showToast: (msg: string) => void;
 }
 
 export function useLeadsWorkspace({
   currentUserName,
+  enabled = true,
   showToast,
 }: UseLeadsWorkspaceOptions) {
-  // Leads state loaded from Database API
   const [leads, setLeads] = useState<Lead[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasLoadedLeads, setHasLoadedLeads] = useState(false);
@@ -33,12 +33,13 @@ export function useLeadsWorkspace({
     total: 0,
     newLeads: 0,
     quotingLeads: 0,
+    quoteSentLeads: 0,
+    awaitingResponseLeads: 0,
     wonLeads: 0,
     lostLeads: 0,
     salesLeaderboard: [],
   });
 
-  // Pagination & Quick Preset state
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [quickPreset, setQuickPreset] = useState<QuickLeadPreset>("all");
@@ -46,7 +47,6 @@ export function useLeadsWorkspace({
   // Server-backed & Client-side CRM Filters
   const [showFilters, setShowFilters] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  // The input updates `searchQuery` instantly; the API only sees the value after a short pause (300ms).
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(searchQuery), 300);
@@ -64,16 +64,17 @@ export function useLeadsWorkspace({
   // Modals state
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
-  const [aiLeadDraft, setAiLeadDraft] = useState<AiLeadDraft | null>(null);
-  const [aiLeadWarning, setAiLeadWarning] = useState<string | null>(null);
+  const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [isImportLeadsOpen, setIsImportLeadsOpen] = useState(false);
   const [isExportingLeads, setIsExportingLeads] = useState(false);
 
-  // Fetch Leads from Backend Database.
-  // - search is debounced (one request after the user pauses typing, not one per keystroke)
-  // - a newer request cancels the previous one, so a slow old response can never overwrite newer results
   const fetchAbortRef = useRef<AbortController | null>(null);
   const fetchLeads = useCallback(async () => {
+    if (!enabled) {
+      setIsLoading(false);
+      return;
+    }
+
     fetchAbortRef.current?.abort();
     const controller = new AbortController();
     fetchAbortRef.current = controller;
@@ -108,6 +109,8 @@ export function useLeadsWorkspace({
         total: json.data.stats.total,
         newLeads: json.data.stats.newLeads,
         quotingLeads: json.data.stats.quotingLeads,
+        quoteSentLeads: json.data.stats.quoteSentLeads || 0,
+        awaitingResponseLeads: json.data.stats.awaitingResponseLeads || 0,
         wonLeads: json.data.stats.wonLeads,
         lostLeads: json.data.stats.lostLeads || 0,
         salesLeaderboard: json.data.stats.salesLeaderboard || [],
@@ -115,7 +118,7 @@ export function useLeadsWorkspace({
       setHasLoadedLeads(true);
       setLeadLoadError(null);
     } catch (error) {
-      if (controller.signal.aborted) return; // superseded by a newer request — not an error
+      if (controller.signal.aborted) return;
       setLeadLoadError(
         error instanceof Error
           ? error.message
@@ -124,34 +127,35 @@ export function useLeadsWorkspace({
     } finally {
       if (fetchAbortRef.current === controller) setIsLoading(false);
     }
-  }, [debouncedSearch, statusFilter, sourceFilter, salesFilter, pageSize]);
+  }, [enabled, debouncedSearch, statusFilter, sourceFilter, salesFilter, pageSize]);
 
   useEffect(() => {
     void fetchLeads();
     return () => fetchAbortRef.current?.abort();
   }, [fetchLeads]);
 
-  // Apply additional Product, Date & Quick Preset filters client-side without touching Backend API contract
   const displayedLeads = useMemo(() => {
     return leads.filter((lead) => {
-      if (quickPreset === "hot" && lead.priorityTier !== "HOT") {
-        return false;
-      }
-      if (quickPreset === "overdue_sla" && lead.slaStatus !== "OVERDUE") {
-        return false;
-      }
-      if (
-        quickPreset === "pending_approval" &&
-        lead.directorApprovalStatus !== "PENDING"
-      ) {
-        return false;
-      }
-
       if (productFilter !== "all") {
         const cat = (lead.category || "").toLowerCase();
         const prod = (lead.product || "").toLowerCase();
+        const group = (lead.productGroup || "").toLowerCase();
         const target = productFilter.toLowerCase();
-        if (!cat.includes(target) && !prod.includes(target)) {
+
+        if (target === "màn hình led" || target === "led_screen") {
+          if (group !== "led_screen" && !cat.includes("led") && !prod.includes("màn hình led")) {
+            return false;
+          }
+        } else if (target === "bảng điện tử" || target === "electronic_board") {
+          if (
+            group !== "electronic_board" &&
+            !cat.includes("bảng") &&
+            !prod.includes("bảng") &&
+            !prod.includes("hệ thống")
+          ) {
+            return false;
+          }
+        } else if (!cat.includes(target) && !prod.includes(target)) {
           return false;
         }
       }
@@ -180,14 +184,7 @@ export function useLeadsWorkspace({
 
       return true;
     });
-  }, [
-    leads,
-    quickPreset,
-    productFilter,
-    dateFilter,
-    customDateFrom,
-    customDateTo,
-  ]);
+  }, [leads, productFilter, dateFilter, customDateFrom, customDateTo]);
 
   const activeFilterCount = [
     Boolean(searchQuery.trim()),
@@ -196,11 +193,8 @@ export function useLeadsWorkspace({
     salesFilter !== "all",
     productFilter !== "all",
     dateFilter !== "all",
-    quickPreset !== "all",
   ].filter(Boolean).length;
 
-  // KPI cards act as stage navigation, so they keep showing global totals while only
-  // the status drill-down is applied; any other filter switches them to filtered counts.
   const nonStatusFilterCount =
     activeFilterCount - (statusFilter !== "all" ? 1 : 0);
 
@@ -217,10 +211,18 @@ export function useLeadsWorkspace({
     showToast("Đã đặt lại bộ lọc tìm kiếm");
   }, [showToast]);
 
-  const handleAddLead = useCallback(() => {
-    showToast("Đã lưu Lead mới vào cơ sở dữ liệu");
-    void fetchLeads();
-  }, [showToast, fetchLeads]);
+  const handleAddLead = useCallback(
+    (savedLead?: Lead) => {
+      showToast(editingLead ? "Đã cập nhật thông tin Lead thành công" : "Đã lưu Lead mới vào cơ sở dữ liệu");
+      if (savedLead && selectedLead && selectedLead.id === savedLead.id) {
+        setSelectedLead(savedLead);
+      }
+      setEditingLead(null);
+      setIsNewLeadOpen(false);
+      void fetchLeads();
+    },
+    [showToast, fetchLeads, editingLead, selectedLead]
+  );
 
   const handleUpdateStatus = useCallback(
     async (id: string, newStatus: LeadStatus, reason?: string) => {
@@ -268,7 +270,7 @@ export function useLeadsWorkspace({
 
         showToast(
           (envelope as { message?: string }).message ||
-            "Đã bàn giao Lead thành công"
+            "Đã chuyển kinh doanh phụ trách thành công"
         );
         void fetchLeads();
         return true;
@@ -300,28 +302,40 @@ export function useLeadsWorkspace({
     setSelectedLead(lead);
   }, []);
 
+  const handleCloseSelectedLead = useCallback(() => {
+    setSelectedLead(null);
+  }, []);
+
   const handleOpenNewLead = useCallback(() => {
-    setAiLeadDraft(null);
-    setAiLeadWarning(null);
+    setEditingLead(null);
     setIsNewLeadOpen(true);
   }, []);
 
-  const handleOpenPrefilledModal = useCallback(
-    (draft: AiLeadDraft, warning?: string) => {
-      setAiLeadDraft(draft);
-      setAiLeadWarning(warning || null);
-      setIsNewLeadOpen(true);
-    },
-    []
-  );
+  const handleCloseNewLead = useCallback(() => {
+    setIsNewLeadOpen(false);
+    setEditingLead(null);
+  }, []);
 
-  const handleQuickLeadCreated = useCallback(
-    (_lead: Lead, msg: string) => {
-      showToast(msg);
-      void fetchLeads();
-    },
-    [showToast, fetchLeads]
-  );
+  const handleOpenEditLead = useCallback((lead: Lead) => {
+    setEditingLead(lead);
+    setIsNewLeadOpen(true);
+  }, []);
+
+  const handleOpenImportLeads = useCallback(() => {
+    setIsImportLeadsOpen(true);
+  }, []);
+
+  const handleCloseImportLeads = useCallback(() => {
+    setIsImportLeadsOpen(false);
+  }, []);
+
+  const handleToggleFilters = useCallback(() => {
+    setShowFilters((v) => !v);
+  }, []);
+
+  const handleRetryFetch = useCallback(() => {
+    void fetchLeads();
+  }, [fetchLeads]);
 
   const handleFilterStatus = useCallback((status: string) => {
     setStatusFilter(status);
@@ -377,6 +391,10 @@ export function useLeadsWorkspace({
     showToast,
   ]);
 
+  const handleTriggerExportLeads = useCallback(() => {
+    void handleExportLeads();
+  }, [handleExportLeads]);
+
   return {
     leads,
     displayedLeads,
@@ -415,10 +433,8 @@ export function useLeadsWorkspace({
     setSelectedLead,
     isNewLeadOpen,
     setIsNewLeadOpen,
-    aiLeadDraft,
-    setAiLeadDraft,
-    aiLeadWarning,
-    setAiLeadWarning,
+    editingLead,
+    setEditingLead,
     isImportLeadsOpen,
     setIsImportLeadsOpen,
     isExportingLeads,
@@ -429,9 +445,15 @@ export function useLeadsWorkspace({
     handleReassignSales,
     handleDeleteLead,
     handleSelectLead,
+    handleCloseSelectedLead,
     handleOpenNewLead,
-    handleOpenPrefilledModal,
-    handleQuickLeadCreated,
+    handleCloseNewLead,
+    handleOpenEditLead,
+    handleOpenImportLeads,
+    handleCloseImportLeads,
+    handleToggleFilters,
+    handleRetryFetch,
+    handleTriggerExportLeads,
     handleFilterStatus,
     handleQuickUpdateStatus,
     handleExportLeads,

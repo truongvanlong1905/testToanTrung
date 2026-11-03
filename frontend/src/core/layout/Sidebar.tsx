@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useEffect, useState } from "react";
 import {
@@ -15,6 +15,7 @@ import {
   User,
   X,
 } from "lucide-react";
+import { canRoleAccessTab } from "@/src/core/auth/permissions";
 import { cn } from "@/src/core/utils/utils";
 import { ToanTrungLogo } from "@/src/core/layout/ToanTrungLogo";
 import { getRoleMeta, StatusBadge } from "@/src/core/ui/badge";
@@ -26,7 +27,6 @@ interface SidebarProps {
   onClose: () => void;
   userRole?: string;
   unreadNotificationsCount?: number;
-  /** Total Leads, owned by the page (already fetched there — no second request here) */
   leadsCount?: number;
 }
 
@@ -40,7 +40,6 @@ interface NavItem {
 
 const HEX_COLOR = /^#([0-9a-f]{6})$/i;
 
-/** Connects the admin "brand colour" setting to the design tokens (--primary / --primary-hover). */
 function applyBrandColor(hex?: string) {
   const root = document.documentElement;
   if (!hex || !HEX_COLOR.test(hex)) {
@@ -96,7 +95,7 @@ export function Sidebar({
       label: "Dashboard",
       icon: LayoutDashboard,
     },
-  ];
+  ].filter((item) => canRoleAccessTab(userRole, item.id));
 
   const workspaceItems: NavItem[] = [
     {
@@ -122,10 +121,10 @@ export function Sidebar({
     },
     {
       id: "ai-design",
-      label: "AI Design",
+      label: "Thiết kế AI",
       icon: Sparkles,
     },
-  ];
+  ].filter((item) => canRoleAccessTab(userRole, item.id));
 
   const systemItems: NavItem[] = [
     {
@@ -140,30 +139,22 @@ export function Sidebar({
       label: "Hồ sơ tài khoản",
       icon: User,
     },
-    ...(userRole === "ADMIN" || userRole === "DIRECTOR"
-      ? [
-          {
-            id: "users",
-            label: "Tác nhân & Bổ nhiệm",
-            icon: UserCog,
-          },
-          ...(userRole === "ADMIN"
-            ? [
-                {
-                  id: "brand",
-                  label: "Thương hiệu",
-                  icon: ShieldCheck,
-                },
-                {
-                  id: "settings",
-                  label: "Cài đặt hệ thống",
-                  icon: Settings,
-                },
-              ]
-            : []),
-        ]
-      : []),
-  ];
+    {
+      id: "users",
+      label: "Quản lý tài khoản",
+      icon: UserCog,
+    },
+    {
+      id: "brand",
+      label: "Thương hiệu",
+      icon: ShieldCheck,
+    },
+    {
+      id: "settings",
+      label: "Cài đặt hệ thống",
+      icon: Settings,
+    },
+  ].filter((item) => canRoleAccessTab(userRole, item.id));
 
   const roleMeta = getRoleMeta(userRole);
 
@@ -237,8 +228,8 @@ export function Sidebar({
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        {/* Top Brand Bar (h-14 aligned with Header) */}
-        <div className="h-14 flex items-center justify-between px-3.5 border-b border-slate-200/80 shrink-0">
+        {/* Top Brand Bar */}
+        <div className="h-14 max-h-[80px] flex items-center justify-between px-3.5 border-b border-slate-200/80 shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -259,6 +250,9 @@ export function Sidebar({
                   <span className="block font-semibold text-[14px] leading-none tracking-[-0.02em] text-slate-900 truncate">
                     {brand.name}
                   </span>
+                  <span className="block text-[10px] font-semibold tracking-[0.06em] text-slate-400 uppercase mt-0.5 truncate">
+                    MINI CRM
+                  </span>
                 </div>
               </div>
             ) : (
@@ -278,34 +272,35 @@ export function Sidebar({
 
         {/* Navigation Groups */}
         <div className="flex-1 overflow-y-auto px-2.5 py-3 space-y-5">
-          {/* Primary: Dashboard */}
           <nav className="space-y-0.5" aria-label="Tổng quan">
             {primaryItems.map(renderNavButton)}
           </nav>
 
-          {/* Group: Workspace */}
-          <div>
-            <div className="px-2.5 mb-1.5">
-              <span className="text-[11px] font-semibold tracking-[0.05em] text-slate-400 uppercase">
-                Workspace
-              </span>
+          {workspaceItems.length > 0 && (
+            <div>
+              <div className="px-2.5 mb-1.5">
+                <span className="text-[11px] font-semibold tracking-[0.05em] text-slate-400 uppercase">
+                  Nghiệp vụ
+                </span>
+              </div>
+              <nav className="space-y-0.5" aria-label="Nghiệp vụ">
+                {workspaceItems.map(renderNavButton)}
+              </nav>
             </div>
-            <nav className="space-y-0.5" aria-label="Workspace">
-              {workspaceItems.map(renderNavButton)}
-            </nav>
-          </div>
+          )}
 
-          {/* Group: System */}
-          <div>
-            <div className="px-2.5 mb-1.5">
-              <span className="text-[11px] font-semibold tracking-[0.05em] text-slate-400 uppercase">
-                System
-              </span>
+          {systemItems.length > 0 && (
+            <div>
+              <div className="px-2.5 mb-1.5">
+                <span className="text-[11px] font-semibold tracking-[0.05em] text-slate-400 uppercase">
+                  Hệ thống
+                </span>
+              </div>
+              <nav className="space-y-0.5" aria-label="Hệ thống">
+                {systemItems.map(renderNavButton)}
+              </nav>
             </div>
-            <nav className="space-y-0.5" aria-label="Hệ thống">
-              {systemItems.map(renderNavButton)}
-            </nav>
-          </div>
+          )}
         </div>
 
         {/* Footer: Role Context */}

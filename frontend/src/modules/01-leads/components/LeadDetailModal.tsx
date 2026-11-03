@@ -1,6 +1,6 @@
-﻿"use client";
+"use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -13,57 +13,57 @@ import {
   Tag,
   FileText,
   Clock,
-  UserCheck,
   Paperclip,
   AlertTriangle,
   Send,
   Loader2,
   Download,
-  Calculator,
-  Printer,
   CheckCircle2,
-  XCircle,
   MessageSquarePlus,
-  Flame,
-  ShieldCheck,
   History,
-  Sparkles,
   Copy,
-  Zap,
+  Pencil,
+  Upload,
 } from "lucide-react";
-import { Lead, LeadQuoteItem, LeadStatus, LeadActivityType, STATUS_LIST } from "../types";
+import { Lead, LeadStatus, LeadActivityType, STATUS_LIST } from "../types";
 import { getLeadStatusTone, StatusBadge } from "@/src/core/ui/badge";
 import { Button } from "@/src/core/ui/button";
 import { UnderlineTabs } from "@/src/core/ui/segmented-control";
 import { lockBodyScroll, unlockBodyScroll, recordModalOpenMetric } from "@/src/core/ui/modal";
-import { sharedGetJson } from "@/src/core/http/shared-fetch";
+import { peekSharedJson, sharedGetJson } from "@/src/core/http/shared-fetch";
 import { cn } from "@/src/core/utils/utils";
 import {
   ACTIVITY_TYPE_OPTIONS,
-  LED_MODULE_PRESETS,
-  formatVnd,
   toDatetimeLocalValue,
 } from "./lead-detail-constants";
-import { openPrintableQuoteWindow } from "./printable-quote";
 import { LeadDetailAuditTab } from "./LeadDetailAuditTab";
 
 interface LeadDetailModalProps {
   lead: Lead | null;
   onClose: () => void;
+  onEditLead?: (lead: Lead) => void;
   onUpdateStatus: (id: string, newStatus: LeadStatus, reason?: string) => Promise<boolean | void>;
   onReassignSales?: (leadId: string, newSalesId: string, reason: string) => Promise<boolean | void>;
   currentUserRole?: string;
   onLeadMutated?: () => void;
 }
 
-type DetailTab = "dossier" | "quote" | "care" | "audit";
+type DetailTab = "dossier" | "care" | "audit";
+
+function getInitialSalesList(): Array<{ id: string; name: string; initials: string }> {
+  const cached = peekSharedJson("/api/users?role=SALES", 60_000);
+  if (cached?.success && Array.isArray(cached.data?.users) && cached.data.users.length > 0) {
+    return cached.data.users;
+  }
+  return [];
+}
 
 export const LeadDetailModal = React.memo(function LeadDetailModal({
   lead,
   onClose,
+  onEditLead,
   onUpdateStatus,
   onReassignSales,
-  currentUserRole,
   onLeadMutated,
 }: LeadDetailModalProps) {
   const [detailedLead, setDetailedLead] = useState<Lead | null>(lead);
@@ -81,32 +81,31 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
 
-  // SLA Scheduler State
-  const [slaDateInput, setSlaDateInput] = useState("");
-  const [slaNoteInput, setSlaNoteInput] = useState("");
+  // Quote Response Tracking State (QD-01 & AC-23)
+  const [hasResponded, setHasResponded] = useState<boolean>(
+    Boolean(lead?.customerRespondedAt)
+  );
+  const [responseNote, setResponseNote] = useState<string>(
+    lead?.customerResponseNote || ""
+  );
+  const [isSavingQuoteResponse, setIsSavingQuoteResponse] = useState(false);
+
+  // Follow-up Schedule State
+  const [slaDateInput, setSlaDateInput] = useState(() =>
+    toDatetimeLocalValue(lead?.nextFollowUpAt)
+  );
+  const [slaNoteInput, setSlaNoteInput] = useState(() => lead?.nextActionNote || "");
   const [isSavingSla, setIsSavingSla] = useState(false);
 
-  // Reassignment State
+  // Reassignment State ("Chuyển kinh doanh khác", AC-12)
   const [showReassignForm, setShowReassignForm] = useState(false);
   const [salesList, setSalesList] = useState<Array<{ id: string; name: string; initials: string }>>(
-    []
+    getInitialSalesList
   );
-  const [newSalesId, setNewSalesId] = useState("");
+  const [newSalesId, setNewSalesId] = useState(() => getInitialSalesList()[0]?.id || "");
   const [reassignReason, setReassignReason] = useState("");
+  const [reassignError, setReassignError] = useState<string | null>(null);
   const [isReassigning, setIsReassigning] = useState(false);
-
-  // Quotation Builder State
-  const [moduleSpec, setModuleSpec] = useState(LED_MODULE_PRESETS[2].label);
-  const [widthMeters, setWidthMeters] = useState<number>(4);
-  const [heightMeters, setHeightMeters] = useState<number>(2.5);
-  const [unitPriceVnd, setUnitPriceVnd] = useState<number>(LED_MODULE_PRESETS[2].unitPrice);
-  const [processorVnd, setProcessorVnd] = useState<number>(LED_MODULE_PRESETS[2].defaultProcessor);
-  const [structureInstallVnd, setStructureInstallVnd] = useState<number>(15_000_000);
-  const [discountPercent, setDiscountPercent] = useState<number>(0);
-  const [warrantyMonths, setWarrantyMonths] = useState<number>(24);
-  const [quoteNotes, setQuoteNotes] = useState("");
-  const [isCreatingQuote, setIsCreatingQuote] = useState(false);
-  const [approvingQuoteId, setApprovingQuoteId] = useState<string | null>(null);
 
   // Care Log State
   const [activityType, setActivityType] = useState<LeadActivityType>("CALL");
@@ -115,24 +114,8 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
   const [activityFollowUp, setActivityFollowUp] = useState("");
   const [isLoggingActivity, setIsLoggingActivity] = useState(false);
 
-  // AI Sales Co-Pilot State
-  const [isRunningCopilot, setIsRunningCopilot] = useState(false);
-  const [aiCopilot, setAiCopilot] = useState<{
-    aiEngine: string;
-    recommendedConfig: {
-      moduleSpec: string;
-      widthMeters: number;
-      heightMeters: number;
-      areaSqm: number;
-      unitPriceVnd: number;
-      processorVnd: number;
-      structureInstallVnd: number;
-      estimatedTotalVnd: number;
-      rationale: string;
-    };
-    outreachMessage: string;
-    nextBestActions: string[];
-  } | null>(null);
+  // Attachment Upload State
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
 
   const showFeedback = (tone: "success" | "error", text: string) => {
     setFeedbackMsg({ tone, text });
@@ -141,139 +124,102 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
     }, 4500);
   };
 
-  const refreshLeadDetail = useCallback(
-    async (targetId: string) => {
-      try {
-        const res = await fetch(`/api/leads/${targetId}`);
-        const json = await res.json();
-        if (json.success && json.data?.lead) {
-          const fresh: Lead = json.data.lead;
-          setDetailedLead(fresh);
-          setSlaDateInput(toDatetimeLocalValue(fresh.nextFollowUpAt));
-          setSlaNoteInput(fresh.nextActionNote || "");
-          if (fresh.ledWidth && fresh.ledWidth > 0) setWidthMeters(fresh.ledWidth);
-          if (fresh.ledHeight && fresh.ledHeight > 0) setHeightMeters(fresh.ledHeight);
-          if (fresh.ledModuleType) setModuleSpec(fresh.ledModuleType);
-        }
-      } catch (err) {
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  const refreshLeadDetail = useCallback(async (targetId: string, signal?: AbortSignal) => {
+    try {
+      const res = await fetch(`/api/leads/${targetId}`, { signal });
+      const json = await res.json();
+      if (!signal?.aborted && json.success && json.data?.lead) {
+        const fresh: Lead = json.data.lead;
+        setDetailedLead(fresh);
+        setSelectedStatus(fresh.status);
+        setHasResponded(Boolean(fresh.customerRespondedAt));
+        setResponseNote(fresh.customerResponseNote || "");
+        setSlaDateInput(toDatetimeLocalValue(fresh.nextFollowUpAt));
+        setSlaNoteInput(fresh.nextActionNote || "");
+      }
+    } catch (err) {
+      if (!signal?.aborted) {
         console.warn("Error refreshing lead detail:", err);
       }
-    },
-    []
-  );
+    }
+  }, []);
 
+  const isLeadOpen = Boolean(lead);
+  const leadCode = lead?.code;
   useEffect(() => {
-    if (!lead) return;
+    if (!isLeadOpen) return;
     const openStartMs = typeof performance !== "undefined" ? performance.now() : 0;
     lockBodyScroll();
-    recordModalOpenMetric(`Chi tiết Lead ${lead.code}`, openStartMs);
+    recordModalOpenMetric(`Chi tiết Lead ${leadCode || ""}`, openStartMs);
 
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     window.addEventListener("keydown", handleEsc);
     return () => {
       window.removeEventListener("keydown", handleEsc);
       unlockBodyScroll();
     };
-  }, [lead, onClose]);
+  }, [isLeadOpen, leadCode]);
 
+  const prevLeadIdRef = useRef<string | undefined>(lead?.id);
   useEffect(() => {
-    setDetailedLead(lead);
-    setSelectedStatus(lead?.status || "");
-    setShowFailurePrompt(false);
-    setShowReassignForm(false);
-    setFailureReason("");
-    setStatusError(null);
-    setFeedbackMsg(null);
-    setAiCopilot(null);
-    setActiveTab("dossier");
-    setSlaDateInput(toDatetimeLocalValue(lead?.nextFollowUpAt));
-    setSlaNoteInput(lead?.nextActionNote || "");
+    if (!lead?.id) return;
 
-    if (lead?.id) {
-      setIsLoadingDetail(true);
-      refreshLeadDetail(lead.id).finally(() => setIsLoadingDetail(false));
-
-      sharedGetJson("/api/users?role=SALES", 60_000)
-        .then(({ ok, payload }) => {
-          if (ok && payload?.success && Array.isArray(payload.data?.users)) {
-            setSalesList(payload.data.users);
-            if (payload.data.users.length > 0) {
-              setNewSalesId(payload.data.users[0].id);
-            }
-          }
-        })
-        .catch(() => {});
+    if (prevLeadIdRef.current !== lead.id) {
+      prevLeadIdRef.current = lead.id;
+      setDetailedLead(lead);
+      setSelectedStatus(lead.status || "");
+      setHasResponded(Boolean(lead.customerRespondedAt));
+      setResponseNote(lead.customerResponseNote || "");
+      setShowFailurePrompt(false);
+      setShowReassignForm(false);
+      setFailureReason("");
+      setStatusError(null);
+      setReassignError(null);
+      setFeedbackMsg(null);
+      setActiveTab("dossier");
+      setSlaDateInput(toDatetimeLocalValue(lead.nextFollowUpAt));
+      setSlaNoteInput(lead.nextActionNote || "");
     }
-  }, [lead, refreshLeadDetail]);
+
+    // Defer detail fetch until after the 150ms GPU entrance animation completes
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void refreshLeadDetail(lead.id, controller.signal);
+
+      if (salesList.length === 0) {
+        sharedGetJson("/api/users?role=SALES", 60_000)
+          .then(({ ok, payload }) => {
+            if (
+              !controller.signal.aborted &&
+              ok &&
+              payload?.success &&
+              Array.isArray(payload.data?.users) &&
+              payload.data.users.length > 0
+            ) {
+              setSalesList(payload.data.users);
+              setNewSalesId((prev) => prev || payload.data.users[0].id);
+            }
+          })
+          .catch(() => {});
+      }
+    }, 170);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [lead, refreshLeadDetail, salesList.length]);
 
   if (!lead || typeof document === "undefined") return null;
 
   const currentLead = detailedLead || lead;
-  const isDirectorOrAdmin = currentUserRole === "DIRECTOR" || currentUserRole === "ADMIN";
-
-  const handleRunAiCopilot = async () => {
-    setIsRunningCopilot(true);
-    try {
-      const res = await fetch("/api/leads/ai-assist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "SALES_COPILOT",
-          leadId: currentLead.id,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success || !json.data) {
-        throw new Error(json.error?.message || "Không thể chạy phân tích AI Co-Pilot");
-      }
-      setAiCopilot(json.data);
-    } catch (err: any) {
-      showFeedback("error", err.message || "Lỗi kết nối AI Co-Pilot");
-    } finally {
-      setIsRunningCopilot(false);
-    }
-  };
-
-  const handleApplyAiToQuoteBuilder = () => {
-    if (!aiCopilot) return;
-    const cfg = aiCopilot.recommendedConfig;
-    setModuleSpec(cfg.moduleSpec);
-    setWidthMeters(cfg.widthMeters);
-    setHeightMeters(cfg.heightMeters);
-    setUnitPriceVnd(cfg.unitPriceVnd);
-    setProcessorVnd(cfg.processorVnd);
-    setStructureInstallVnd(cfg.structureInstallVnd);
-    setQuoteNotes(cfg.rationale);
-    setActiveTab("quote");
-    showFeedback(
-      "success",
-      `Đã áp dụng cấu hình AI (${cfg.widthMeters}m × ${cfg.heightMeters}m = ${cfg.areaSqm}m²) sang Dự toán Báo giá!`
-    );
-  };
-
-  const handleCopyOutreach = async () => {
-    if (!aiCopilot?.outreachMessage) return;
-    try {
-      await navigator.clipboard.writeText(aiCopilot.outreachMessage);
-      showFeedback("success", "Đã sao chép kịch bản tin nhắn Zalo / Email để gửi khách hàng!");
-    } catch {
-      showFeedback("error", "Không thể truy cập bộ nhớ tạm trình duyệt");
-    }
-  };
-
-  // Live LED Quotation math
-  const safeWidth = Math.max(0.2, Number(widthMeters) || 0.2);
-  const safeHeight = Math.max(0.2, Number(heightMeters) || 0.2);
-  const computedAreaSqm = Number((safeWidth * safeHeight).toFixed(2));
-  const ledCost = Math.round(computedAreaSqm * (Number(unitPriceVnd) || 0));
-  const subtotalVnd =
-    ledCost + (Number(processorVnd) || 0) + (Number(structureInstallVnd) || 0);
-  const safeDiscount = Math.min(50, Math.max(0, Number(discountPercent) || 0));
-  const discountVnd = Math.round(subtotalVnd * (safeDiscount / 100));
-  const finalQuoteTotalVnd = Math.max(0, subtotalVnd - discountVnd);
-  const requiresDirectorSignoff = safeDiscount > 8 || finalQuoteTotalVnd >= 200_000_000;
 
   const handleStatusSelect = async (newStatus: LeadStatus) => {
     setStatusError(null);
@@ -289,8 +235,8 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
       setSelectedStatus(newStatus);
       setShowFailurePrompt(false);
       await refreshLeadDetail(currentLead.id);
-    } catch (err: any) {
-      setStatusError(err.message || "Lỗi cập nhật trạng thái");
+    } catch (err: unknown) {
+      setStatusError(err instanceof Error ? err.message : "Lỗi cập nhật trạng thái");
     } finally {
       setIsUpdatingStatus(false);
     }
@@ -309,10 +255,43 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
       setShowFailurePrompt(false);
       setSelectedStatus("Thất bại");
       await refreshLeadDetail(currentLead.id);
-    } catch (err: any) {
-      setStatusError(err.message || "Lỗi cập nhật trạng thái");
+    } catch (err: unknown) {
+      setStatusError(err instanceof Error ? err.message : "Lỗi cập nhật trạng thái");
     } finally {
       setIsUpdatingStatus(false);
+    }
+  };
+
+  const handleSaveQuoteResponse = async () => {
+    setIsSavingQuoteResponse(true);
+    try {
+      const res = await fetch(`/api/leads/${currentLead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hasCustomerResponded: hasResponded,
+          customerResponseNote: responseNote.trim() || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error?.message || "Không thể lưu trạng thái phản hồi báo giá");
+      }
+      showFeedback(
+        "success",
+        hasResponded
+          ? "Đã ghi nhận khách hàng đã phản hồi sau báo giá!"
+          : "Đã cập nhật trạng thái chờ khách hàng phản hồi báo giá."
+      );
+      await refreshLeadDetail(currentLead.id);
+      onLeadMutated?.();
+    } catch (err: unknown) {
+      showFeedback(
+        "error",
+        err instanceof Error ? err.message : "Lỗi cập nhật phản hồi báo giá"
+      );
+    } finally {
+      setIsSavingQuoteResponse(false);
     }
   };
 
@@ -336,95 +315,73 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
       });
       const json = await res.json();
       if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Không thể lưu lịch hẹn SLA");
+        throw new Error(json.error?.message || "Không thể lưu lịch hẹn");
       }
-      showFeedback("success", "Đã cập nhật lịch hẹn SLA & nhắc việc chăm sóc!");
+      showFeedback("success", "Đã cập nhật lịch hẹn chăm sóc tiếp theo!");
       await refreshLeadDetail(currentLead.id);
       onLeadMutated?.();
-    } catch (err: any) {
-      showFeedback("error", err.message || "Lỗi lưu lịch hẹn SLA");
+    } catch (err: unknown) {
+      showFeedback("error", err instanceof Error ? err.message : "Lỗi lưu lịch hẹn");
     } finally {
       setIsSavingSla(false);
     }
   };
 
   const handleReassign = async () => {
-    if (!newSalesId || !onReassignSales) return;
+    setReassignError(null);
+    if (!newSalesId) {
+      setReassignError("Vui lòng chọn nhân viên kinh doanh nhận Lead.");
+      return;
+    }
+    if (!reassignReason.trim()) {
+      setReassignError("Bắt buộc nhập lý do chuyển kinh doanh khác.");
+      return;
+    }
+    if (!onReassignSales) return;
     setIsReassigning(true);
     try {
-      await onReassignSales(currentLead.id, newSalesId, reassignReason);
+      await onReassignSales(currentLead.id, newSalesId, reassignReason.trim());
       setReassignReason("");
       setShowReassignForm(false);
       await refreshLeadDetail(currentLead.id);
+    } catch (err: unknown) {
+      setReassignError(
+        err instanceof Error ? err.message : "Không thể chuyển kinh doanh phụ trách"
+      );
     } finally {
       setIsReassigning(false);
     }
   };
 
-  const handleCreateQuote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsCreatingQuote(true);
+  const handleUploadAttachment = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setIsUploadingFile(true);
     try {
-      const res = await fetch(`/api/leads/${currentLead.id}/quotes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          moduleSpec,
-          widthMeters: safeWidth,
-          heightMeters: safeHeight,
-          unitPriceVnd: Number(unitPriceVnd) || 0,
-          processorVnd: Number(processorVnd) || 0,
-          structureInstallVnd: Number(structureInstallVnd) || 0,
-          discountPercent: safeDiscount,
-          warrantyMonths: Number(warrantyMonths) || 24,
-          notes: quoteNotes.trim() || null,
-          requestDirectorApproval: requiresDirectorSignoff,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Lỗi lập báo giá LED");
+      for (let i = 0; i < files.length; i++) {
+        const data = new FormData();
+        data.append("file", files[i]);
+        data.append("leadId", currentLead.id);
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: data,
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.error?.message || "Không thể tải tệp đính kèm");
+        }
       }
-      setQuoteNotes("");
-      showFeedback("success", json.message || "Đã lập báo giá LED thành công!");
+      showFeedback("success", "Đã tải lên tài liệu đính kèm thành công!");
       await refreshLeadDetail(currentLead.id);
       onLeadMutated?.();
-    } catch (err: any) {
-      showFeedback("error", err.message || "Không thể tạo báo giá LED");
+    } catch (err: unknown) {
+      showFeedback(
+        "error",
+        err instanceof Error ? err.message : "Lỗi tải tài liệu đính kèm"
+      );
     } finally {
-      setIsCreatingQuote(false);
-    }
-  };
-
-  const handleDirectorDecision = async (
-    quoteId: string,
-    decision: "APPROVED" | "REJECTED"
-  ) => {
-    setApprovingQuoteId(quoteId);
-    try {
-      const res = await fetch(`/api/leads/${currentLead.id}/quotes`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          quoteId,
-          decision,
-          note:
-            decision === "APPROVED"
-              ? "Ban Giám Đốc đồng ý khung giá & chiết khấu dự án"
-              : "Đề nghị cân đối lại tỷ lệ chiết khấu theo khung chuẩn",
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || "Lỗi phê duyệt báo giá");
-      }
-      showFeedback("success", json.message || "Đã cập nhật quyết định phê duyệt!");
-      await refreshLeadDetail(currentLead.id);
-      onLeadMutated?.();
-    } catch (err: any) {
-      showFeedback("error", err.message || "Không thể phê duyệt báo giá");
-    } finally {
-      setApprovingQuoteId(null);
+      setIsUploadingFile(false);
+      e.target.value = "";
     }
   };
 
@@ -456,8 +413,8 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
       showFeedback("success", json.message || "Đã lưu nhật ký chăm sóc khách hàng!");
       await refreshLeadDetail(currentLead.id);
       onLeadMutated?.();
-    } catch (err: any) {
-      showFeedback("error", err.message || "Không thể lưu nhật ký");
+    } catch (err: unknown) {
+      showFeedback("error", err instanceof Error ? err.message : "Không thể lưu nhật ký");
     } finally {
       setIsLoggingActivity(false);
     }
@@ -467,21 +424,20 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
   const assignmentTimeline = currentLead.assignments || [];
   const attachments = currentLead.attachments || [];
   const activities = currentLead.activities || [];
-  const quotes = currentLead.quotes || [];
-  const score = currentLead.priorityScore ?? 35;
-  const tier = currentLead.priorityTier || (score >= 70 ? "HOT" : score >= 40 ? "WARM" : "COLD");
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[85] flex justify-end bg-slate-950/60 animate-fade-in"
-      onClick={onClose}
+      className="fixed inset-0 z-[85] flex items-center justify-center p-4 sm:p-6 bg-slate-950/60 animate-fade-in"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       role="dialog"
       aria-modal="true"
       aria-label={`Chi tiết Lead ${currentLead.code}`}
     >
-      {/* Right Enterprise Slide-Over Sheet */}
+      {/* Centered Enterprise Modal Dialog (GPU-composited .modal-panel + .animate-scale-in) */}
       <div
-        className="sheet-panel w-full max-w-3xl h-full bg-elevated border-l border-slate-200 shadow-floating flex flex-col overflow-hidden animate-sheet-in"
+        className="modal-panel w-full max-w-3xl max-h-[88vh] my-auto bg-elevated border border-slate-200 rounded-2xl shadow-floating flex flex-col overflow-hidden animate-scale-in"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Sheet Header */}
@@ -495,93 +451,53 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                 <StatusBadge tone={getLeadStatusTone(currentLead.status)}>
                   {currentLead.status}
                 </StatusBadge>
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold kpi-number",
-                    tier === "HOT"
-                      ? "bg-rose-50 border-rose-200 text-rose-700"
-                      : tier === "WARM"
-                        ? "bg-amber-50 border-amber-200 text-amber-700"
-                        : "bg-slate-100 border-slate-200 text-slate-600"
-                  )}
-                >
-                  {tier === "HOT" && <Flame className="w-3 h-3 text-rose-600" />}
-                  Điểm ưu tiên: {score}/100 ({tier})
-                </span>
-                {currentLead.slaLabel && (
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-medium",
-                      currentLead.slaStatus === "OVERDUE"
-                        ? "bg-rose-50 border-rose-200 text-rose-700"
-                        : currentLead.slaStatus === "DUE_SOON"
-                          ? "bg-amber-50 border-amber-200 text-amber-700"
-                          : "bg-slate-50 border-slate-200 text-slate-600"
-                    )}
-                  >
-                    <Clock className="w-3 h-3" />
-                    {currentLead.slaLabel}
-                  </span>
+                {currentLead.isDuplicate && (
+                  <StatusBadge tone="warning" size="sm" dot={false}>
+                    Cảnh báo trùng SĐT
+                  </StatusBadge>
                 )}
                 {isLoadingDetail && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />}
               </div>
 
-              <h2 className="text-[18px] font-semibold text-slate-900 tracking-[-0.015em] truncate">
+              <h2 className="text-[18px] font-semibold text-slate-900 tracking-[-0.015em] break-words">
                 {currentLead.customerName}
               </h2>
-              <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5 truncate">
-                <Building className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span className="truncate">{currentLead.companyName}</span>
-                <span className="text-slate-300">·</span>
-                <span className="font-semibold text-blue-600 kpi-number">
-                  {currentLead.estimatedValue}
-                </span>
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Đóng bảng chi tiết Lead"
-              className="h-8 w-8 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {currentLead.directorApprovalStatus === "PENDING" && (
-            <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2 text-amber-800">
-                <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>
-                  Hồ sơ có báo giá vượt khung chiết khấu / giá trị lớn đang{" "}
-                  <strong>chờ Tác nhân Giám Đốc phê duyệt</strong>.
-                </span>
-              </div>
-              {activeTab !== "quote" && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("quote")}
-                  className="text-amber-900 font-semibold underline shrink-0 cursor-pointer"
-                >
-                  Xem &amp; Duyệt ngay →
-                </button>
+              {currentLead.companyName && (
+                <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5 break-words">
+                  <Building className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>{currentLead.companyName}</span>
+                </p>
               )}
             </div>
-          )}
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {onEditLead && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<Pencil className="w-3.5 h-3.5" />}
+                  onClick={() => onEditLead(currentLead)}
+                >
+                  Chỉnh sửa
+                </Button>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Đóng bảng chi tiết Lead"
+                className="h-8 w-8 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
 
           <UnderlineTabs
             value={activeTab}
             onChange={setActiveTab}
             className="border-b-0"
             options={[
-              { id: "dossier", label: "Hồ sơ & SLA", icon: <FileText className="w-3.5 h-3.5" /> },
-              {
-                id: "quote",
-                label: "Dự toán m² & Báo giá",
-                count: quotes.length,
-                icon: <Calculator className="w-3.5 h-3.5" />,
-              },
+              { id: "dossier", label: "Hồ sơ & Tiến độ", icon: <FileText className="w-3.5 h-3.5" /> },
               {
                 id: "care",
                 label: "Nhật ký CSKH",
@@ -590,7 +506,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
               },
               {
                 id: "audit",
-                label: "Kiểm toán",
+                label: "Lịch sử & Bàn giao",
                 count: statusTimeline.length + assignmentTimeline.length,
                 icon: <History className="w-3.5 h-3.5" />,
               },
@@ -620,119 +536,22 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
             </div>
           )}
 
-          {/* ================= TAB 1: HỒ SƠ & SLA ================= */}
+          {/* ================= TAB 1: HỒ SƠ & TIẾN ĐỘ ================= */}
           {activeTab === "dossier" && (
             <>
-              {/* 0. AI SALES CO-PILOT */}
-              <section className="rounded-xl border border-blue-200/90 bg-gradient-to-br from-blue-50/75 to-violet-50/50 p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-violet-600 text-white flex items-center justify-center shrink-0">
-                      <Sparkles className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-[13px] font-semibold text-slate-900">
-                        AI Co-Pilot Đề xuất Cấu hình LED &amp; Kịch bản Chốt Sale
-                      </h3>
-                      <p className="text-[11.5px] text-slate-500">
-                        Tự động tính kích thước m² chuẩn 16:9, chọn dòng Module &amp; soạn tin nhắn Zalo gửi {currentLead.customerName}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    isLoading={isRunningCopilot}
-                    leftIcon={<Sparkles className="w-3.5 h-3.5" />}
-                    onClick={() => void handleRunAiCopilot()}
-                  >
-                    {aiCopilot ? "Phân tích lại bằng AI" : "AI Phân tích & Soạn kịch bản"}
-                  </Button>
-                </div>
-
-                {aiCopilot && (
-                  <div className="space-y-3 pt-2 border-t border-blue-100 animate-fade-in">
-                    <div className="p-3 rounded-xl bg-white border border-slate-200/90 space-y-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-xs font-semibold text-blue-700">
-                          {aiCopilot.recommendedConfig.moduleSpec}
-                        </span>
-                        <span className="text-xs font-bold text-slate-900 kpi-number">
-                          {aiCopilot.recommendedConfig.widthMeters}m ×{" "}
-                          {aiCopilot.recommendedConfig.heightMeters}m (
-                          {aiCopilot.recommendedConfig.areaSqm} m²) · ~
-                          {formatVnd(aiCopilot.recommendedConfig.estimatedTotalVnd)}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        {aiCopilot.recommendedConfig.rationale}
-                      </p>
-                      <div className="pt-1 flex justify-end">
-                        <Button
-                          type="button"
-                          variant="subtle"
-                          size="sm"
-                          leftIcon={<Zap className="w-3.5 h-3.5" />}
-                          onClick={handleApplyAiToQuoteBuilder}
-                        >
-                          Đẩy cấu hình này sang Báo giá m² →
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-white border border-slate-200/90 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11.5px] font-semibold uppercase tracking-wide text-slate-500">
-                          Kịch bản tin nhắn Zalo / Email gửi khách
-                        </span>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          leftIcon={<Copy className="w-3.5 h-3.5 text-blue-600" />}
-                          onClick={() => void handleCopyOutreach()}
-                        >
-                          Sao chép gửi Zalo
-                        </Button>
-                      </div>
-                      <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
-                        {aiCopilot.outreachMessage}
-                      </p>
-                    </div>
-
-                    <div className="space-y-1">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                        3 bước hành động ưu tiên tiếp theo ({aiCopilot.aiEngine})
-                      </span>
-                      <ul className="space-y-1">
-                        {aiCopilot.nextBestActions.map((step, i) => (
-                          <li key={i} className="text-xs text-slate-700 flex items-start gap-2">
-                            <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-                              {i + 1}
-                            </span>
-                            <span>{step}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {/* 1. TRẠNG THÁI */}
+              {/* 1. TRẠNG THÁI BÁN HÀNG & PHẢN HỒI BÁO GIÁ */}
               <section className="space-y-3">
                 <h3 className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-400">
-                  1. Trạng thái xử lý
+                  1. Trạng thái bán hàng &amp; Phản hồi báo giá
                 </h3>
                 <div className="p-4 rounded-xl border border-slate-200/90 bg-slate-50/50 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <p className="text-[13px] font-medium text-slate-900">
-                        Cập nhật tiến độ cơ hội
+                        Cập nhật trạng thái xử lý Lead
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Mọi thay đổi đều tự động lưu vào Timeline kiểm toán.
+                        Mọi thay đổi đều tự động lưu vào lịch sử kiểm toán.
                       </p>
                     </div>
 
@@ -760,7 +579,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                             Bắt buộc nhập lý do Thất bại
                           </p>
                           <p className="text-rose-700 mt-0.5">
-                            Nêu rõ nguyên nhân (ngân sách, khách hoãn dự án, đối thủ, thay đổi quy cách...) để lưu lịch sử.
+                            Nêu rõ nguyên nhân khách hàng không chốt để phục vụ thống kê báo cáo.
                           </p>
                         </div>
                       </div>
@@ -810,20 +629,75 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                       <span className="text-rose-800">{currentLead.failureReason}</span>
                     </div>
                   )}
+
+                  {/* Quote Sent & Customer Response Tracking (QD-01, AC-23) */}
+                  {(currentLead.status === "Đã gửi báo giá" || currentLead.quoteSentAt) && (
+                    <div className="pt-3 border-t border-slate-200/80 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="font-semibold text-slate-800">
+                          Theo dõi phản hồi của khách hàng sau khi gửi báo giá:
+                        </span>
+                        <span
+                          className={cn(
+                            "px-2 py-0.5 rounded border text-[11px] font-semibold",
+                            hasResponded
+                              ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                              : "bg-amber-50 border-amber-200 text-amber-800"
+                          )}
+                        >
+                          {hasResponded
+                            ? "Khách hàng đã phản hồi"
+                            : "Đã gửi báo giá — Chưa ghi nhận phản hồi"}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <select
+                          value={hasResponded ? "responded" : "waiting"}
+                          onChange={(e) => setHasResponded(e.target.value === "responded")}
+                          aria-label="Trạng thái phản hồi sau báo giá"
+                          className="crm-select w-full bg-white text-xs"
+                        >
+                          <option value="waiting">Chưa ghi nhận phản hồi từ khách</option>
+                          <option value="responded">Khách hàng đã phản hồi báo giá</option>
+                        </select>
+
+                        <input
+                          type="text"
+                          value={responseNote}
+                          onChange={(e) => setResponseNote(e.target.value)}
+                          placeholder="Ghi chú nội dung phản hồi của khách hàng..."
+                          className="crm-input bg-white text-xs"
+                        />
+                      </div>
+
+                      <div className="flex justify-end">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          isLoading={isSavingQuoteResponse}
+                          leftIcon={<CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+                          onClick={handleSaveQuoteResponse}
+                        >
+                          Lưu trạng thái phản hồi báo giá
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </section>
 
-              {/* 2. CAM KẾT SLA & LỊCH HẸN FOLLOW-UP */}
+              {/* 2. LỊCH HẸN CHĂM SÓC TIẾP THEO */}
               <section className="space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-400">
-                    2. Cam kết SLA &amp; Lịch hẹn chăm sóc tiếp theo
+                    2. Lịch hẹn chăm sóc tiếp theo
                   </h3>
                   <div className="flex items-center gap-1.5 text-[11px]">
                     <button
                       type="button"
                       onClick={() =>
-                        applyQuickSlaOffset(2, "Gọi lại xác nhận mặt bằng & kích thước LED")
+                        applyQuickSlaOffset(2, "Gọi lại trao đổi nhu cầu chi tiết")
                       }
                       className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium cursor-pointer"
                     >
@@ -832,7 +706,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                     <button
                       type="button"
                       onClick={() =>
-                        applyQuickSlaOffset(24, "Gửi bản dự toán báo giá LED & hẹn khảo sát")
+                        applyQuickSlaOffset(24, "Theo dõi tiến độ gửi báo giá cho khách")
                       }
                       className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium cursor-pointer"
                     >
@@ -841,7 +715,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                     <button
                       type="button"
                       onClick={() =>
-                        applyQuickSlaOffset(72, "Theo dõi phản hồi trình duyệt ngân sách của khách")
+                        applyQuickSlaOffset(72, "Theo dõi phản hồi sau báo giá của khách")
                       }
                       className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium cursor-pointer"
                     >
@@ -854,7 +728,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label htmlFor="sla-datetime" className="crm-label text-xs">
-                        Thời hạn liên hệ tiếp theo (SLA)
+                        Thời điểm liên hệ tiếp theo
                       </label>
                       <input
                         id="sla-datetime"
@@ -866,7 +740,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                     </div>
                     <div>
                       <label htmlFor="sla-note" className="crm-label text-xs">
-                        Hành động cần thực hiện
+                        Nội dung công việc cần thực hiện
                       </label>
                       <input
                         id="sla-note"
@@ -878,52 +752,64 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                       />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between gap-2 pt-1">
-                    <span className="text-[11.5px] text-slate-500">
-                      Hồ sơ quá giờ hẹn sẽ tự động nổi cảnh báo đỏ tại mục{" "}
-                      <strong>Cần gọi SLA</strong>.
-                    </span>
+                  <div className="flex justify-end pt-1">
                     <Button
                       variant="primary"
                       size="sm"
                       isLoading={isSavingSla}
                       onClick={handleSaveSla}
                     >
-                      Lưu lịch hẹn SLA
+                      Lưu lịch hẹn
                     </Button>
                   </div>
                 </div>
               </section>
 
-              {/* 3. THÔNG TIN KHÁCH HÀNG */}
+              {/* 3. THÔNG TIN KHÁCH HÀNG & NHU CẦU SẢN PHẨM */}
               <section className="space-y-3">
                 <h3 className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-400">
-                  3. Thông tin khách hàng &amp; Dự án LED
+                  3. Thông tin khách hàng &amp; Nhu cầu sản phẩm
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="p-3.5 rounded-xl border border-slate-200/80 bg-white">
-                    <span className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
-                      <Phone className="w-3.5 h-3.5 text-slate-400" /> Số điện thoại
-                    </span>
-                    <p className="text-[13.5px] font-semibold text-slate-900 font-mono">
-                      {currentLead.phone}
-                    </p>
+                  <div className="p-3.5 rounded-xl border border-slate-200/80 bg-white flex items-center justify-between gap-2">
+                    <div>
+                      <span className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
+                        <Phone className="w-3.5 h-3.5 text-slate-400" /> Số điện thoại
+                      </span>
+                      <p className="text-[13.5px] font-semibold text-slate-900 font-mono">
+                        {currentLead.phone}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(currentLead.phone).catch(() => {});
+                        showFeedback("success", `Đã sao chép số điện thoại ${currentLead.phone}`);
+                      }}
+                      className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 cursor-pointer"
+                      title="Sao chép số điện thoại"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
                   </div>
 
                   <div className="p-3.5 rounded-xl border border-slate-200/80 bg-white">
                     <span className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
                       <Mail className="w-3.5 h-3.5 text-slate-400" /> Email liên hệ
                     </span>
-                    <p className="text-[13.5px] font-medium text-slate-900 truncate">
-                      {currentLead.email || "Chưa cung cấp"}
+                    <p className="text-[13.5px] font-medium text-slate-900 break-all">
+                      {currentLead.email || "Chưa có thông tin"}
                     </p>
                   </div>
 
                   <div className="p-3.5 rounded-xl border border-slate-200/80 bg-white">
                     <span className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
-                      <Tag className="w-3.5 h-3.5 text-slate-400" /> Nguồn tiếp cận
+                      <Tag className="w-3.5 h-3.5 text-slate-400" /> Nguồn &amp; Kênh liên hệ
                     </span>
-                    <p className="text-[13.5px] font-medium text-slate-900">{currentLead.source}</p>
+                    <p className="text-[13.5px] font-medium text-slate-900">
+                      {currentLead.source}
+                      {currentLead.contactChannel ? ` · Kênh: ${currentLead.contactChannel}` : ""}
+                    </p>
                   </div>
 
                   <div className="p-3.5 rounded-xl border border-slate-200/80 bg-white">
@@ -941,69 +827,74 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                     <div>
                       <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
                         <Tv className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Hạng mục sản phẩm / Giải pháp</span>
+                        <span>Danh mục sản phẩm quan tâm</span>
                       </div>
                       <p className="text-[14px] font-semibold text-slate-900">
-                        {currentLead.product}
+                        {(currentLead.product || "")
+                          .replace(/\s*\([^)]*m²[^)]*\)/gi, "")
+                          .trim() || "Chưa chọn sản phẩm"}
                       </p>
-                      {currentLead.ledModuleType && (
-                        <p className="text-xs text-blue-600 font-medium mt-0.5">
-                          Cấu hình báo giá: {currentLead.ledModuleType}
-                          {currentLead.ledWidth && currentLead.ledHeight
-                            ? ` (${currentLead.ledWidth}m × ${currentLead.ledHeight}m = ${Number(
-                                (currentLead.ledWidth * currentLead.ledHeight).toFixed(2)
-                              )} m²)`
-                            : ""}
+                      {currentLead.productCustomText && (
+                        <p className="text-xs text-blue-700 font-medium mt-0.5">
+                          Mô tả sản phẩm khác: {currentLead.productCustomText}
                         </p>
                       )}
                     </div>
-                    <StatusBadge tone="info" dot={false} size="sm">
-                      {currentLead.category}
-                    </StatusBadge>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <StatusBadge tone="info" dot={false} size="sm">
+                        {currentLead.category}
+                      </StatusBadge>
+                      {currentLead.demandType && (
+                        <StatusBadge tone="neutral" dot={false} size="sm">
+                          Nhu cầu: {currentLead.demandType}
+                        </StatusBadge>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-100 text-xs">
-                    <div>
-                      <span className="text-slate-500 block mb-0.5">Giá trị dự toán hiện tại</span>
-                      <span className="text-[14px] font-semibold text-slate-900 kpi-number">
-                        {currentLead.estimatedValue}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 flex items-center gap-1 mb-0.5">
-                        <MapPin className="w-3 h-3 text-slate-400" /> Địa điểm lắp đặt
-                      </span>
-                      <span className="text-[13px] font-medium text-slate-800">
-                        {currentLead.installationAddress || currentLead.location}
-                      </span>
-                    </div>
+                  <div className="pt-3 border-t border-slate-100 text-xs">
+                    <span className="text-slate-500 flex items-center gap-1 mb-0.5">
+                      <MapPin className="w-3 h-3 text-slate-400" /> Khu vực &amp; Địa điểm lắp đặt
+                    </span>
+                    <span className="text-[13px] font-medium text-slate-800">
+                      {currentLead.installationAddress ||
+                        currentLead.location ||
+                        "Chưa có thông tin địa điểm"}
+                    </span>
                   </div>
 
                   <div className="pt-3 border-t border-slate-100">
                     <span className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
-                      <FileText className="w-3.5 h-3.5 text-slate-400" /> Ghi chú kỹ thuật &amp; Yêu cầu
+                      <FileText className="w-3.5 h-3.5 text-slate-400" /> Ghi chú nhu cầu khách hàng
                     </span>
                     <p className="text-xs text-slate-700 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100">
-                      {currentLead.notes || "Chưa có ghi chú bổ sung."}
+                      {(currentLead.notes || "")
+                        .replace(/\[AI Bóc tách nhanh\]\s*(Nội dung gốc:\s*)?/gi, "")
+                        .trim() || "Chưa có ghi chú bổ sung."}
                     </p>
                   </div>
                 </div>
               </section>
 
-              {/* 4. SALES PHỤ TRÁCH */}
+              {/* 4. SALES PHỤ TRÁCH & CHUYỂN KINH DOANH KHÁC (AC-12) */}
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-400">
-                    4. Sales phụ trách
+                    4. Nhân sự Kinh doanh phụ trách
                   </h3>
                   {onReassignSales && (
-                    <button
-                      type="button"
-                      onClick={() => setShowReassignForm((prev) => !prev)}
-                      className="text-xs font-medium text-blue-600 hover:text-blue-700 cursor-pointer"
-                    >
-                      {showReassignForm ? "Đóng bàn giao" : "Chuyển bàn giao Sales"}
-                    </button>
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-blue-700 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={showReassignForm}
+                        onChange={(e) => {
+                          setShowReassignForm(e.target.checked);
+                          setReassignError(null);
+                        }}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>Chuyển kinh doanh khác</span>
+                    </label>
                   )}
                 </div>
 
@@ -1030,7 +921,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <label htmlFor="reassign-sales-select" className="crm-label text-xs">
-                            Sales tiếp nhận mới
+                            Nhân viên kinh doanh nhận Lead <span className="text-rose-500">*</span>
                           </label>
                           <select
                             id="reassign-sales-select"
@@ -1047,7 +938,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                         </div>
                         <div>
                           <label htmlFor="reassign-reason" className="crm-label text-xs">
-                            Lý do bàn giao
+                            Lý do chuyển kinh doanh <span className="text-rose-500">*</span>
                           </label>
                           <input
                             id="reassign-reason"
@@ -1059,11 +950,17 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                           />
                         </div>
                       </div>
+                      {reassignError && (
+                        <p className="text-xs font-medium text-rose-600">{reassignError}</p>
+                      )}
                       <div className="flex justify-end gap-2">
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => setShowReassignForm(false)}
+                          onClick={() => {
+                            setShowReassignForm(false);
+                            setReassignError(null);
+                          }}
                         >
                           Hủy
                         </Button>
@@ -1074,7 +971,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                           leftIcon={<Send className="w-3.5 h-3.5" />}
                           onClick={handleReassign}
                         >
-                          Xác nhận bàn giao
+                          Xác nhận chuyển kinh doanh
                         </Button>
                       </div>
                     </div>
@@ -1082,16 +979,34 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                 </div>
               </section>
 
-              {/* 5. TÀI LIỆU */}
+              {/* 5. TÀI LIỆU ĐÍNH KÈM */}
               <section className="space-y-3">
-                <h3 className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-400">
-                  5. Tài liệu &amp; Bản vẽ ({attachments.length})
-                </h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-400">
+                    5. Tài liệu &amp; Tệp đính kèm ({attachments.length})
+                  </h3>
+                  <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-blue-600 cursor-pointer">
+                    {isUploadingFile ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isUploadingFile ? "Đang tải lên..." : "Thêm tệp đính kèm"}</span>
+                    <input
+                      type="file"
+                      multiple
+                      onChange={handleUploadAttachment}
+                      disabled={isUploadingFile}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
                 <div className="p-4 rounded-xl border border-slate-200/90 bg-white">
                   {attachments.length === 0 ? (
                     <div className="flex items-center gap-2 text-xs text-slate-400 py-1">
                       <Paperclip className="w-3.5 h-3.5" />
-                      <span>Chưa có tài liệu hoặc bản vẽ kỹ thuật đính kèm.</span>
+                      <span>Chưa có tài liệu hoặc bản vẽ đính kèm.</span>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -1127,348 +1042,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
             </>
           )}
 
-          {/* ================= TAB 2: DỰ TOÁN LED m² & BÁO GIÁ PDF ================= */}
-          {activeTab === "quote" && (
-            <div className="space-y-6">
-              <form
-                onSubmit={handleCreateQuote}
-                className="p-4 rounded-xl border border-slate-200/90 bg-white space-y-4"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                  <div>
-                    <h3 className="text-[14px] font-semibold text-slate-900">
-                      Công cụ bóc tách Dự toán Màn hình LED (m²)
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Tự động tính diện tích m², bộ xử lý Novastar, khung kết cấu và kiểm soát khung chiết khấu Ban Giám Đốc.
-                    </p>
-                  </div>
-                  <StatusBadge tone="info" dot={false} size="sm">
-                    Diện tích: {computedAreaSqm} m²
-                  </StatusBadge>
-                </div>
-
-                <div>
-                  <label htmlFor="led-preset" className="crm-label text-xs">
-                    Chọn cấu hình Module LED chuẩn Toàn Trung
-                  </label>
-                  <select
-                    id="led-preset"
-                    value={
-                      LED_MODULE_PRESETS.some((p) => p.label === moduleSpec)
-                        ? moduleSpec
-                        : "__custom__"
-                    }
-                    onChange={(e) => {
-                      const found = LED_MODULE_PRESETS.find((p) => p.label === e.target.value);
-                      if (found) {
-                        setModuleSpec(found.label);
-                        setUnitPriceVnd(found.unitPrice);
-                        setProcessorVnd(found.defaultProcessor);
-                      }
-                    }}
-                    className="crm-select w-full font-medium"
-                  >
-                    {LED_MODULE_PRESETS.map((p) => (
-                      <option key={p.label} value={p.label}>
-                        {p.label} — {formatVnd(p.unitPrice)}/m²
-                      </option>
-                    ))}
-                    {!LED_MODULE_PRESETS.some((p) => p.label === moduleSpec) && (
-                      <option value="__custom__">{moduleSpec}</option>
-                    )}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div>
-                    <label htmlFor="quote-width" className="crm-label text-xs">
-                      Chiều ngang (m)
-                    </label>
-                    <input
-                      id="quote-width"
-                      type="number"
-                      step="0.1"
-                      min="0.2"
-                      max="200"
-                      value={widthMeters}
-                      onChange={(e) => setWidthMeters(parseFloat(e.target.value) || 0)}
-                      className="crm-input kpi-number font-semibold"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="quote-height" className="crm-label text-xs">
-                      Chiều cao (m)
-                    </label>
-                    <input
-                      id="quote-height"
-                      type="number"
-                      step="0.1"
-                      min="0.2"
-                      max="200"
-                      value={heightMeters}
-                      onChange={(e) => setHeightMeters(parseFloat(e.target.value) || 0)}
-                      className="crm-input kpi-number font-semibold"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label htmlFor="quote-unit-price" className="crm-label text-xs">
-                      Đơn giá Module LED (VNĐ / m²)
-                    </label>
-                    <input
-                      id="quote-unit-price"
-                      type="number"
-                      step="100000"
-                      min="100000"
-                      value={unitPriceVnd}
-                      onChange={(e) => setUnitPriceVnd(parseInt(e.target.value, 10) || 0)}
-                      className="crm-input kpi-number font-semibold"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label htmlFor="quote-processor" className="crm-label text-xs">
-                      Bộ xử lý Novastar (VNĐ)
-                    </label>
-                    <input
-                      id="quote-processor"
-                      type="number"
-                      step="500000"
-                      min="0"
-                      value={processorVnd}
-                      onChange={(e) => setProcessorVnd(parseInt(e.target.value, 10) || 0)}
-                      className="crm-input kpi-number"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="quote-install" className="crm-label text-xs">
-                      Khung thép &amp; Thi công (VNĐ)
-                    </label>
-                    <input
-                      id="quote-install"
-                      type="number"
-                      step="500000"
-                      min="0"
-                      value={structureInstallVnd}
-                      onChange={(e) => setStructureInstallVnd(parseInt(e.target.value, 10) || 0)}
-                      className="crm-input kpi-number"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label htmlFor="quote-discount" className="crm-label text-xs">
-                        Chiết khấu (%)
-                      </label>
-                      <input
-                        id="quote-discount"
-                        type="number"
-                        step="0.5"
-                        min="0"
-                        max="50"
-                        value={discountPercent}
-                        onChange={(e) => setDiscountPercent(parseFloat(e.target.value) || 0)}
-                        className="crm-input kpi-number font-semibold"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="quote-warranty" className="crm-label text-xs">
-                        Bảo hành
-                      </label>
-                      <select
-                        id="quote-warranty"
-                        value={warrantyMonths}
-                        onChange={(e) => setWarrantyMonths(parseInt(e.target.value, 10))}
-                        className="crm-select w-full"
-                      >
-                        <option value={12}>12 tháng</option>
-                        <option value={24}>24 tháng</option>
-                        <option value={36}>36 tháng</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="quote-notes" className="crm-label text-xs">
-                    Ghi chú tiến độ / điều khoản dự án (hiển thị trên file PDF)
-                  </label>
-                  <input
-                    id="quote-notes"
-                    type="text"
-                    placeholder="VD: Đã bao gồm cáp quang âm tường 50m & khung viền Alu đen..."
-                    value={quoteNotes}
-                    onChange={(e) => setQuoteNotes(e.target.value)}
-                    className="crm-input text-xs"
-                  />
-                </div>
-
-                {/* Live Cost Summary Box */}
-                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/90 space-y-2 text-xs">
-                  <div className="flex justify-between text-slate-600">
-                    <span>
-                      Màn hình LED ({safeWidth}m × {safeHeight}m = {computedAreaSqm} m²):
-                    </span>
-                    <span className="kpi-number font-medium text-slate-900">
-                      {formatVnd(ledCost)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-slate-600">
-                    <span>Bộ xử lý tín hiệu &amp; Hệ khung kết cấu thi công:</span>
-                    <span className="kpi-number font-medium text-slate-900">
-                      {formatVnd((Number(processorVnd) || 0) + (Number(structureInstallVnd) || 0))}
-                    </span>
-                  </div>
-                  {safeDiscount > 0 && (
-                    <div className="flex justify-between text-emerald-700">
-                      <span>Chiết khấu thương mại ({safeDiscount}%):</span>
-                      <span className="kpi-number font-medium">- {formatVnd(discountVnd)}</span>
-                    </div>
-                  )}
-                  <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
-                    <span className="font-semibold text-slate-900 text-[13px]">
-                      Tổng dự toán báo giá:
-                    </span>
-                    <span className="text-[16px] font-bold text-blue-600 kpi-number">
-                      {formatVnd(finalQuoteTotalVnd)}
-                    </span>
-                  </div>
-                </div>
-
-                {requiresDirectorSignoff && (
-                  <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
-                    <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <span>
-                      <strong>Kiểm soát nội bộ 3 Tác nhân:</strong> Báo giá có chiết khấu{" "}
-                      <strong>&gt; 8%</strong> hoặc quy mô dự án{" "}
-                      <strong>&ge; 200.000.000 đ</strong> sẽ tự động gửi thông báo trình{" "}
-                      <strong>Tác nhân Giám Đốc</strong> ký duyệt trước khi chốt hợp đồng.
-                    </span>
-                  </div>
-                )}
-
-                <div className="flex justify-end">
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    size="md"
-                    isLoading={isCreatingQuote}
-                    leftIcon={<Calculator className="w-4 h-4" />}
-                  >
-                    {requiresDirectorSignoff
-                      ? "Lưu Báo giá & Trình Giám đốc duyệt"
-                      : "Lưu Báo giá & Cập nhật giá trị Lead"}
-                  </Button>
-                </div>
-              </form>
-
-              {/* Saved Quotations List */}
-              <section className="space-y-3">
-                <h3 className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-400">
-                  Danh sách Phiên bản Báo giá ({quotes.length})
-                </h3>
-
-                {quotes.length === 0 ? (
-                  <div className="p-6 rounded-xl border border-dashed border-slate-200 text-center text-xs text-slate-400">
-                    Chưa có phiên bản báo giá nào được lưu cho khách hàng này.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {quotes.map((q) => (
-                      <div
-                        key={q.id}
-                        className="p-4 rounded-xl border border-slate-200/90 bg-white space-y-3"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-mono text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200/80">
-                                {q.code}
-                              </span>
-                              {q.status === "PENDING_DIRECTOR" && (
-                                <StatusBadge tone="warning" size="sm">
-                                  Chờ Giám đốc duyệt
-                                </StatusBadge>
-                              )}
-                              {q.status === "DIRECTOR_APPROVED" && (
-                                <StatusBadge tone="success" size="sm">
-                                  Giám đốc đã duyệt ({q.approvedByName})
-                                </StatusBadge>
-                              )}
-                              {q.status === "SENT" && (
-                                <StatusBadge tone="info" size="sm">
-                                  Báo giá chuẩn
-                                </StatusBadge>
-                              )}
-                              {q.status === "DRAFT" && (
-                                <StatusBadge tone="error" size="sm">
-                                  Yêu cầu điều chỉnh lại
-                                </StatusBadge>
-                              )}
-                            </div>
-                            <p className="text-[13.5px] font-semibold text-slate-900 mt-1.5">
-                              {q.moduleSpec}
-                            </p>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              Kích thước: {q.widthMeters}m × {q.heightMeters}m ={" "}
-                              <strong>{q.areaSqm} m²</strong> · Chiết khấu: {q.discountPercent}% ·
-                              Bảo hành: {q.warrantyMonths} tháng
-                            </p>
-                          </div>
-
-                          <div className="text-right">
-                            <div className="text-[15px] font-bold text-slate-900 kpi-number">
-                              {formatVnd(q.totalVnd)}
-                            </div>
-                            <div className="text-[11px] text-slate-400 mt-0.5">
-                              Lập bởi {q.createdBy} · {q.createdAt}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            leftIcon={<Printer className="w-3.5 h-3.5" />}
-                            onClick={() => openPrintableQuoteWindow(currentLead, q)}
-                          >
-                            In / Xuất Báo giá PDF (A4)
-                          </Button>
-
-                          {q.status === "PENDING_DIRECTOR" && isDirectorOrAdmin && (
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="danger"
-                                size="sm"
-                                isLoading={approvingQuoteId === q.id}
-                                leftIcon={<XCircle className="w-3.5 h-3.5" />}
-                                onClick={() => handleDirectorDecision(q.id, "REJECTED")}
-                              >
-                                Yêu cầu sửa giá
-                              </Button>
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                isLoading={approvingQuoteId === q.id}
-                                leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
-                                onClick={() => handleDirectorDecision(q.id, "APPROVED")}
-                              >
-                                Giám đốc Ký duyệt giá
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </div>
-          )}
-
-          {/* ================= TAB 3: NHẬT KÝ CHĂM SÓC & KHẢO SÁT ================= */}
+          {/* ================= TAB 2: NHẬT KÝ CHĂM SÓC ================= */}
           {activeTab === "care" && (
             <div className="space-y-6">
               <form
@@ -1476,7 +1050,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                 className="p-4 rounded-xl border border-slate-200/90 bg-white space-y-3.5"
               >
                 <h3 className="text-[14px] font-semibold text-slate-900">
-                  Ghi nhận tương tác chăm sóc &amp; khảo sát thực tế
+                  Ghi nhận tương tác chăm sóc khách hàng
                 </h3>
 
                 <div className="flex flex-wrap gap-1.5">
@@ -1499,13 +1073,13 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
 
                 <div>
                   <label htmlFor="care-summary" className="crm-label text-xs">
-                    Nội dung trao đổi / Kết quả đo đạc mặt bằng *
+                    Nội dung trao đổi với khách hàng *
                   </label>
                   <textarea
                     id="care-summary"
                     rows={2}
                     required
-                    placeholder="VD: Đã gọi xác nhận kích thước hội trường lọt lòng 4.8m x 2.7m, nguồn điện 3 pha cách vị trí màn hình 12m..."
+                    placeholder="VD: Đã trao đổi nhu cầu màn hình LED hội trường, khách hẹn gửi mặt bằng..."
                     value={activitySummary}
                     onChange={(e) => setActivitySummary(e.target.value)}
                     className="crm-textarea text-xs"
@@ -1515,12 +1089,12 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label htmlFor="care-outcome" className="crm-label text-xs">
-                      Phản hồi của khách hàng
+                      Kết quả / Phản hồi của khách hàng
                     </label>
                     <input
                       id="care-outcome"
                       type="text"
-                      placeholder="VD: Khách đề nghị gửi kèm phương án P2.0 và P2.5"
+                      placeholder="VD: Khách đề nghị gửi catalogue và phương án kỹ thuật"
                       value={activityOutcome}
                       onChange={(e) => setActivityOutcome(e.target.value)}
                       className="crm-input text-xs"
@@ -1528,7 +1102,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
                   </div>
                   <div>
                     <label htmlFor="care-followup" className="crm-label text-xs">
-                      Đặt lịch gọi lại tiếp theo (Tùy chọn)
+                      Đặt lịch liên hệ lại tiếp theo (Tùy chọn)
                     </label>
                     <input
                       id="care-followup"
@@ -1594,8 +1168,7 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
             </div>
           )}
 
-
-          {/* ================= TAB 4: LỊCH SỬ KIỂM TOÁN ================= */}
+          {/* ================= TAB 3: LỊCH SỬ & BÀN GIAO ================= */}
           {activeTab === "audit" && (
             <LeadDetailAuditTab
               statusTimeline={statusTimeline}
@@ -1609,25 +1182,16 @@ export const LeadDetailModal = React.memo(function LeadDetailModal({
           <Button variant="secondary" size="md" onClick={onClose}>
             Đóng
           </Button>
-          <div className="flex items-center gap-2">
-            {activeTab !== "quote" && (
-              <Button
-                variant="subtle"
-                size="md"
-                leftIcon={<Calculator className="w-3.5 h-3.5" />}
-                onClick={() => setActiveTab("quote")}
-              >
-                Lập báo giá LED
-              </Button>
-            )}
-            <a
-              href={`tel:${currentLead.phone}`}
-              className="h-9 px-3.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-medium inline-flex items-center gap-2 transition-colors shadow-[0_1px_2px_rgba(37,99,235,0.18)]"
+          {onEditLead && (
+            <Button
+              variant="primary"
+              size="md"
+              leftIcon={<Pencil className="w-3.5 h-3.5" />}
+              onClick={() => onEditLead(currentLead)}
             >
-              <Phone className="w-3.5 h-3.5" />
-              <span>Gọi ({currentLead.phone})</span>
-            </a>
-          </div>
+              Chỉnh sửa hồ sơ
+            </Button>
+          )}
         </div>
       </div>
     </div>,

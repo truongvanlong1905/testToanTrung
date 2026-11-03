@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect, useMemo } from "react";
 import {
@@ -44,12 +44,10 @@ export function TrackingView() {
   const [eventSearch, setEventSearch] = useState("");
 
   // UTM Generator State
-  const [utmUrl, setUtmUrl] = useState(
-    "https://toantrungtelecom.com/san-pham/led-hoi-truong"
-  );
+  const [utmUrl, setUtmUrl] = useState("");
   const [utmSource, setUtmSource] = useState("google");
   const [utmMedium, setUtmMedium] = useState("cpc");
-  const [utmCampaign, setUtmCampaign] = useState("LED_P2.5_Indoor_2026");
+  const [utmCampaign, setUtmCampaign] = useState("Man_Hinh_LED_2026");
   const [generatedLink, setGeneratedLink] = useState("");
 
   const showToast = (msg: string) => {
@@ -73,7 +71,6 @@ export function TrackingView() {
       setTotalEvents(json.data.totalEvents || 0);
       setHasLoaded(true);
     } catch (err) {
-      console.error("Fetch tracking error:", err);
       const msg =
         err instanceof Error ? err.message : "Không thể tải dữ liệu tracking";
       setLoadError(msg);
@@ -89,6 +86,10 @@ export function TrackingView() {
 
   // Generate UTM link
   useEffect(() => {
+    if (!utmUrl.trim()) {
+      setGeneratedLink("");
+      return;
+    }
     try {
       const url = new URL(utmUrl);
       if (!["http:", "https:"].includes(url.protocol)) {
@@ -109,7 +110,7 @@ export function TrackingView() {
     const job = syncJobs.find((item) => item.service === service);
     if (!job || job.status === "NOT_CONFIGURED") {
       return {
-        label: "Not configured",
+        label: "Chưa cấu hình",
         tone: "neutral",
         isConnected: false,
       };
@@ -178,11 +179,12 @@ export function TrackingView() {
     }
   };
 
-  // Top summary metrics derived strictly from real API data
   const uniqueSourcesCount = useMemo(() => {
     const set = new Set<string>();
     events.forEach((ev) => {
-      if (ev.source) set.add(ev.source.trim().toLowerCase());
+      if (ev.source && ev.source !== "Chưa có thông tin") {
+        set.add(ev.source.trim().toLowerCase());
+      }
     });
     return set.size;
   }, [events]);
@@ -198,8 +200,8 @@ export function TrackingView() {
   const overallSyncLabel = useMemo(() => {
     if (!hasLoaded) return null;
     if (connectedApiCount === 3) return "Đồng bộ đầy đủ";
-    if (connectedApiCount > 0) return `${connectedApiCount}/3 API hoạt động`;
-    if (websiteTrackingActive) return "Web Pixel hoạt động";
+    if (connectedApiCount > 0) return `${connectedApiCount}/3 kết nối hoạt động`;
+    if (websiteTrackingActive) return "Ghi nhận từ Website";
     return "Chưa cấu hình";
   }, [hasLoaded, connectedApiCount, websiteTrackingActive]);
 
@@ -253,7 +255,7 @@ export function TrackingView() {
       key: "GOOGLE_ADS",
       title: "Google Ads",
       description:
-        "Đồng bộ chiến dịch tìm kiếm, chi phí quảng cáo và tham số gclid / UTM.",
+        "Đồng bộ chiến dịch tìm kiếm, lượt nhấp quảng cáo và tham số UTM.",
       icon: Megaphone,
       meta: getConnectorMeta("GOOGLE_ADS"),
       lastSync: lastSyncLabel("GOOGLE_ADS"),
@@ -263,7 +265,7 @@ export function TrackingView() {
       key: "GA4",
       title: "Google Analytics 4 (GA4)",
       description:
-        "Đo lường phiên truy cập, hành vi xem trang đích LED và sự kiện gửi form.",
+        "Đo lường phiên truy cập, hành vi xem trang đích và sự kiện gửi biểu mẫu.",
       icon: BarChart2,
       meta: getConnectorMeta("GA4"),
       lastSync: lastSyncLabel("GA4"),
@@ -273,7 +275,7 @@ export function TrackingView() {
       key: "SEARCH_CONSOLE",
       title: "Search Console",
       description:
-        "Theo dõi truy vấn tìm kiếm tự nhiên, CTR và thứ hạng từ khóa Toàn Trung.",
+        "Theo dõi truy vấn tìm kiếm tự nhiên, tỷ lệ nhấp (CTR) và thứ hạng từ khóa.",
       icon: SearchIcon,
       meta: getConnectorMeta("SEARCH_CONSOLE"),
       lastSync: lastSyncLabel("SEARCH_CONSOLE"),
@@ -281,9 +283,9 @@ export function TrackingView() {
     },
     {
       key: "WEBSITE_TRACKING",
-      title: "Website Tracking",
+      title: "Theo dõi Website",
       description:
-        "Thu nhận trực tiếp nguồn truy cập, thiết bị và UTM từ hệ thống landing page nội bộ.",
+        "Thu nhận trực tiếp nguồn truy cập, thiết bị và tham số UTM từ trang đích.",
       icon: Radio,
       meta: websiteTrackingActive
         ? { label: "Đang ghi nhận", tone: "success" as BadgeTone, isConnected: true }
@@ -295,13 +297,11 @@ export function TrackingView() {
 
   return (
     <div className="space-y-6">
-      {/* Toast */}
       <Toast message={toast} onDismiss={() => setToast(null)} />
 
-      {/* Header */}
       <PageHeader
-        title="Tracking"
-        description="Theo dõi nguồn truy cập đa kênh, cấu hình kết nối dữ liệu và khởi tạo liên kết chiến dịch UTM."
+        title="Tracking & Tích hợp nguồn dữ liệu"
+        description="Theo dõi nguồn truy cập đa kênh, kiểm tra kết nối dữ liệu và khởi tạo liên kết chiến dịch UTM."
         actions={
           <>
             <Button
@@ -317,16 +317,15 @@ export function TrackingView() {
                     syncJobs,
                     totalEvents,
                   });
-                  showToast("Đã xuất sổ cái Tracking & UTM (.xlsx — 2 Sheet)");
-                } catch (err) {
-                  console.error("Export Tracking Excel error:", err);
+                  showToast("Đã xuất dữ liệu Tracking (.xlsx) thành công");
+                } catch {
                   showToast("Không thể xuất file Excel. Vui lòng thử lại.");
                 } finally {
                   setIsExportingExcel(false);
                 }
               }}
             >
-              Export (.xlsx)
+              Xuất Excel
             </Button>
 
             <Button
@@ -348,7 +347,7 @@ export function TrackingView() {
       {/* Top Summary (4 KPI Cards) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard
-          label="Total Events"
+          label="Tổng sự kiện"
           value={hasLoaded ? totalEvents.toLocaleString("vi-VN") : null}
           isEmpty={!hasLoaded}
           icon={Activity}
@@ -360,7 +359,7 @@ export function TrackingView() {
           }
         />
         <StatCard
-          label="Lead Sources"
+          label="Nguồn truy cập"
           value={hasLoaded ? `${uniqueSourcesCount} nguồn` : null}
           isEmpty={!hasLoaded}
           icon={Globe}
@@ -368,17 +367,17 @@ export function TrackingView() {
           note="Số kênh utm_source phân biệt đã ghi nhận"
         />
         <StatCard
-          label="Connected Sources"
+          label="Kết nối hoạt động"
           value={hasLoaded ? `${connectedTotalCount} / 4` : null}
           isEmpty={!hasLoaded}
           icon={PlugZap}
           iconTone="slate"
-          badgeText={connectedApiCount === 0 ? "API chưa cấu hình" : undefined}
+          badgeText={connectedApiCount === 0 ? "Chưa cấu hình API" : undefined}
           badgeTone="neutral"
-          note="Google Ads, GA4, Search Console & Web Pixel"
+          note="Google Ads, GA4, Search Console & Website"
         />
         <StatCard
-          label="Sync Status"
+          label="Trạng thái đồng bộ"
           value={overallSyncLabel}
           isEmpty={!hasLoaded}
           icon={RefreshCw}
@@ -386,7 +385,7 @@ export function TrackingView() {
           note={
             connectedApiCount > 0
               ? "Kết nối đồng bộ tự động đang hoạt động"
-              : "Cần cấu hình khóa API trên máy chủ để đồng bộ"
+              : "Cần cấu hình kết nối trên máy chủ để đồng bộ"
           }
         />
       </div>
@@ -458,18 +457,18 @@ export function TrackingView() {
       {/* UTM Campaign Link Builder */}
       <div className="crm-card p-5 space-y-4">
         <SectionHeader
-          title="Công cụ tạo liên kết UTM (UTM Builder)"
-          description="Chuẩn hóa tham số chiến dịch trước khi phân phối trên Google Ads, Facebook hoặc Zalo OA"
+          title="Công cụ tạo liên kết UTM"
+          description="Chuẩn hóa tham số chiến dịch trước khi phân phối trên Google Ads, Facebook hoặc Zalo"
         />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="sm:col-span-2">
-            <label className="crm-label">URL Trang đích (Landing Page)</label>
+            <label className="crm-label">Đường dẫn trang đích (URL)</label>
             <input
               type="url"
               value={utmUrl}
               onChange={(e) => setUtmUrl(e.target.value)}
-              placeholder="https://toantrungtelecom.com/..."
+              placeholder="Nhập đường dẫn trang đích (https://...)"
               className="crm-input"
             />
           </div>
@@ -499,7 +498,7 @@ export function TrackingView() {
               type="text"
               value={utmCampaign}
               onChange={(e) => setUtmCampaign(e.target.value)}
-              placeholder="LED_P2.5_Q4"
+              placeholder="Man_Hinh_LED_2026"
               className="crm-input"
             />
           </div>
@@ -509,7 +508,7 @@ export function TrackingView() {
           <div className="flex items-center gap-2 min-w-0">
             <Share2 className="w-4 h-4 text-blue-600 shrink-0" />
             <span className="font-mono text-xs text-slate-700 truncate select-all">
-              {generatedLink || "Vui lòng nhập URL HTTP/HTTPS hợp lệ để khởi tạo liên kết UTM"}
+              {generatedLink || "Nhập đường dẫn trang đích (https://...) ở trên để tạo liên kết UTM"}
             </span>
           </div>
           <Button
@@ -524,7 +523,7 @@ export function TrackingView() {
                 .catch(() => showToast("Trình duyệt không cho phép sao chép tự động"));
             }}
           >
-            Sao chép link
+            Sao chép liên kết
           </Button>
         </div>
       </div>
@@ -533,7 +532,7 @@ export function TrackingView() {
       <div className="crm-card overflow-hidden">
         <CardHeader
           title="Nhật ký sự kiện truy cập"
-          description="Nguồn truy cập, chiến dịch UTM, thiết bị và vị trí ghi nhận tự động từ website"
+          description="Nguồn truy cập, chiến dịch UTM, thiết bị và vị trí ghi nhận từ website"
           count={`${filteredEvents.length} / ${totalEvents}`}
           actions={
             <SearchInput
@@ -556,7 +555,7 @@ export function TrackingView() {
             description={
               eventSearch
                 ? "Thử xóa từ khóa tìm kiếm để xem toàn bộ nhật ký truy cập đã ghi nhận."
-                : "Khi khách hàng truy cập landing page có gắn mã theo dõi hoặc tham số UTM, sự kiện sẽ hiển thị trực tiếp tại đây."
+                : "Khi khách hàng truy cập trang đích có gắn mã theo dõi hoặc tham số UTM, sự kiện sẽ hiển thị trực tiếp tại đây."
             }
             action={
               eventSearch ? (
@@ -577,10 +576,10 @@ export function TrackingView() {
                 <tr>
                   <th>Thời gian</th>
                   <th>Website nguồn</th>
-                  <th>Source / Medium</th>
+                  <th>Nguồn / Phương thức</th>
                   <th>Chiến dịch &amp; Trang đích</th>
                   <th>Thiết bị</th>
-                  <th>Khu vực / IP</th>
+                  <th>Khu vực / Địa chỉ IP</th>
                 </tr>
               </thead>
               <tbody>
@@ -602,24 +601,22 @@ export function TrackingView() {
                         <div className="flex items-center gap-2">
                           <Globe className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                           <span className="truncate max-w-[180px]">
-                            {ev.websiteSource}
+                            {ev.websiteSource || "Chưa có thông tin"}
                           </span>
                         </div>
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap">
                         <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200/80 text-slate-700 font-mono text-xs">
-                          {ev.source} / {ev.medium}
+                          {ev.source || "Chưa có thông tin"} / {ev.medium || "Chưa có thông tin"}
                         </span>
                       </td>
                       <td className="py-3 px-4">
                         <div className="font-medium text-slate-800 truncate max-w-[230px]">
-                          {ev.campaign || "Truy cập trực tiếp"}
+                          {ev.campaign || "Chưa có thông tin"}
                         </div>
-                        {ev.landingPage && (
-                          <div className="text-[11px] text-slate-400 truncate max-w-[230px]">
-                            {ev.landingPage}
-                          </div>
-                        )}
+                        <div className="text-[11px] text-slate-400 truncate max-w-[230px]">
+                          {ev.landingPage || "Chưa có thông tin"}
+                        </div>
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap text-xs text-slate-600">
                         <span className="inline-flex items-center gap-1.5">
@@ -628,11 +625,11 @@ export function TrackingView() {
                           ) : (
                             <Laptop className="w-3.5 h-3.5 text-slate-400" />
                           )}
-                          {ev.device || "Desktop"}
+                          {ev.device || "Chưa có thông tin"}
                         </span>
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap text-xs text-slate-500">
-                        {ev.location || "Việt Nam"}
+                        {ev.location || "Chưa có thông tin"}
                         {ev.ipAddress ? ` · ${ev.ipAddress}` : ""}
                       </td>
                     </tr>

@@ -1,8 +1,8 @@
-﻿"use client";
+"use client";
 
 import React, { useEffect, useState } from "react";
 import { RotateCcw, SlidersHorizontal } from "lucide-react";
-import { STATUS_LIST, SOURCE_LIST } from "../types";
+import { STATUS_LIST, SOURCE_LIST, OFFICIAL_CATALOG_FALLBACK } from "../types";
 import { SearchInput } from "@/src/core/ui/feedback-states";
 import { Button } from "@/src/core/ui/button";
 import { StatusBadge } from "@/src/core/ui/badge";
@@ -11,11 +11,12 @@ import { sharedGetJson } from "@/src/core/http/shared-fetch";
 
 export const PRODUCT_FILTER_OPTIONS = [
   { value: "all", label: "Tất cả sản phẩm" },
-  { value: "LED trong nhà", label: "LED trong nhà" },
-  { value: "LED ngoài trời", label: "LED ngoài trời" },
-  { value: "Bảng điện tử", label: "Bảng điện tử" },
-  { value: "Màn hình cong / đặc thù", label: "Màn hình cong / đặc thù" },
-  { value: "Khác", label: "Sản phẩm khác" },
+  { value: "Màn hình LED", label: "Nhóm: Màn hình LED" },
+  { value: "Bảng Điện Tử", label: "Nhóm: Bảng Điện Tử" },
+  ...OFFICIAL_CATALOG_FALLBACK.map((item) => ({
+    value: item.name,
+    label: item.name,
+  })),
 ];
 
 export const DATE_FILTER_OPTIONS = [
@@ -98,7 +99,6 @@ export const LeadFilters = React.memo(function LeadFilters({
   const activeCount = activeFlags.filter(Boolean).length;
   const hasActiveFilter = activeCount > 0;
 
-  // Selects that currently narrow the data get a tinted style, so "what is filtered" is visible at a glance.
   const selectClass = (active: boolean) =>
     cn("crm-select w-full sm:w-auto sm:min-w-[148px] cursor-pointer", active && "crm-select-active");
 

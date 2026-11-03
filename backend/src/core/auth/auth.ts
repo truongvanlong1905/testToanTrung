@@ -4,8 +4,31 @@ import { prisma } from "@/src/core/db/prisma";
 import { UserSession, SystemActorType, LegacyRoleType } from "./auth-types";
 import { SESSION_COOKIE_NAME, JWT_SECRET } from "./session-constants";
 import { verifyTokenAtEdge } from "./auth-edge";
+import {
+  ALLOWED_TABS_BY_ROLE,
+  isSalesManager,
+  canAccessLeadsModule,
+  canAccessAllLeadRecords,
+  canUserAccessLeadRecord,
+  canAccessTrackingModule,
+  canAccessAdsModule,
+  canAccessAiDesignModule,
+  canAccessTab,
+} from "./permissions";
 
-export { SESSION_COOKIE_NAME, verifyTokenAtEdge };
+export {
+  SESSION_COOKIE_NAME,
+  verifyTokenAtEdge,
+  ALLOWED_TABS_BY_ROLE,
+  isSalesManager,
+  canAccessLeadsModule,
+  canAccessAllLeadRecords,
+  canUserAccessLeadRecord,
+  canAccessTrackingModule,
+  canAccessAdsModule,
+  canAccessAiDesignModule,
+  canAccessTab,
+};
 export type { UserSession, SystemActorType, LegacyRoleType };
 
 const SESSION_CACHE_TTL_MS = 10_000;
@@ -20,10 +43,10 @@ export function invalidateUserSessionCache(userId?: string): void {
 }
 
 /**
- * Chuẩn hóa role/actorType theo mô hình 3 tác nhân ATTT:
+ * Chuẩn hóa role/actorType theo mô hình phân quyền Mini CRM Toàn Trung:
  * - ADMIN (Quản trị hệ thống)
  * - DIRECTOR (Giám đốc)
- * - USER (Nhân sự thuộc các phòng ban do Admin tạo: SALES, MARKETING, DESIGN, ADS, ...)
+ * - USER (Nhân sự thuộc các phòng ban: SALES, MARKETING, DESIGN, ADS, ...)
  */
 export function resolveActorAndDept(input: {
   role?: string | null;
@@ -92,13 +115,7 @@ export function isManagerialPosition(position?: string | null): boolean {
 }
 
 export function canAccessAllLeads(user: UserSession): boolean {
-  return (
-    user.actorType === "ADMIN" ||
-    user.actorType === "DIRECTOR" ||
-    user.role === "ADMIN" ||
-    user.role === "DIRECTOR" ||
-    isManagerialPosition(user.position)
-  );
+  return canAccessAllLeadRecords(user);
 }
 
 /**
@@ -110,7 +127,6 @@ export function signToken(payload: UserSession): string {
 
 /**
  * Lấy UserSession từ cookie (hoặc Authorization header fallback)
- * Sử dụng bộ nhớ đệm ngắn hạn (10s) kết hợp truy vấn cột tối giản để giảm độ trễ API xuống < 1ms.
  */
 export async function getCurrentUser(request?: Request): Promise<UserSession | null> {
   let token: string | undefined;
